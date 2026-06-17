@@ -1,6 +1,9 @@
 import { join } from "node:path";
 
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
 import { parseCliArgs } from "./args.js";
+import { createComputerUseServer } from "../mcp/server.js";
 import { RuntimeClient } from "../runtime/client.js";
 
 export type DoctorResult = {
@@ -110,5 +113,7 @@ async function defaultCall(tool: string, args: unknown): Promise<unknown> {
 }
 
 async function defaultStartMcp(): Promise<void> {
-  throw new Error("mcp server is not implemented yet");
+  const server = createComputerUseServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 }
