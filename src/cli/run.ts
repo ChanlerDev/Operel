@@ -1,4 +1,7 @@
+import { join } from "node:path";
+
 import { parseCliArgs } from "./args.js";
+import { RuntimeClient } from "../runtime/client.js";
 
 export type DoctorResult = {
   screen_recording: string;
@@ -94,8 +97,16 @@ async function defaultDoctor(): Promise<DoctorResult> {
   return defaultDoctorResult;
 }
 
-async function defaultCall(tool: string): Promise<unknown> {
-  throw new Error(`call is not implemented for tool: ${tool}`);
+async function defaultCall(tool: string, args: unknown): Promise<unknown> {
+  const helperPath =
+    process.env.OPEREL_RUNTIME_HELPER ?? join(process.cwd(), "macos/.build/debug/OperelRuntime");
+  const client = new RuntimeClient({ command: helperPath });
+
+  try {
+    return await client.request(tool, args);
+  } finally {
+    await client.close();
+  }
 }
 
 async function defaultStartMcp(): Promise<void> {
