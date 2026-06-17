@@ -23,7 +23,6 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - [测试策略](./testing-strategy.md)：单元、契约、fixture、真机 smoke 和回归测试。
 - [架构决策](./decisions/ADR-0001-mac-first.md)：Mac 优先、MCP 入口、视觉加 Accessibility、并发边界的关键 ADR。
 - [参考资料](./references.md)：本设计使用的公开资料和需要持续跟踪的上游。
-- [协作实现计划](./superpowers/plans/2026-06-18-computer-use-implementation-plan.md)：按协作规范保存的任务拆解，不作为产品 spec 根文档。
 
 ## 首版建议
 
@@ -50,5 +49,3 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - 协议：MCP tool/resource 契约和 Node-to-Swift runtime JSON-RPC。
 - 安全：app policy、风险动作、人类确认、日志脱敏。
 - 验收：MVP release gate、Mac smoke、Agent smoke。
-
-实现时仍需要按 [协作实现计划](./superpowers/plans/2026-06-18-computer-use-implementation-plan.md) 把这些规格转成代码、测试和真实 Mac smoke。
