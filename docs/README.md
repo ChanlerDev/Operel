@@ -21,6 +21,7 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - [执行引擎](./execution-engine.md)：observe-plan-act loop、元素定位、失败恢复、并发和 artifact 管理。
 - [安全与权限](./security-permissions.md)：TCC 权限、app policy、敏感动作、人类确认和审计。
 - [测试策略](./testing-strategy.md)：单元、契约、fixture、真机 smoke 和回归测试。
+- [实现计划](./plans/2026-06-18-computer-use-implementation-plan.md)：MVP 的工程拆解、验收门槛和任务顺序。
 - [架构决策](./decisions/ADR-0001-mac-first.md)：Mac 优先、MCP 入口、视觉加 Accessibility、并发边界的关键 ADR。
 - [参考资料](./references.md)：本设计使用的公开资料和需要持续跟踪的上游。
 
@@ -49,3 +50,5 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - 协议：MCP tool/resource 契约和 Node-to-Swift runtime JSON-RPC。
 - 安全：app policy、风险动作、人类确认、日志脱敏。
 - 验收：MVP release gate、Mac smoke、Agent smoke。
+
+实现时按 [实现计划](./plans/2026-06-18-computer-use-implementation-plan.md) 拆任务即可。
