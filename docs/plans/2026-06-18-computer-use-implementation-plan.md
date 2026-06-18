@@ -42,36 +42,36 @@ Before coding, implementers must read:
 
 ### Task 1: Create CLI skeleton
 
-- [ ] Create Node package with TypeScript build.
-- [ ] Add `operel-computer-use` bin.
-- [ ] Implement `--help`, `mcp`, `doctor`, `call` command routing.
-- [ ] Add unit test for command parsing.
-- [ ] Commit: `feat: scaffold computer use cli`
+- [x] Create Node package with TypeScript build.
+- [x] Add `operel-computer-use` bin.
+- [x] Implement `--help`, `mcp`, `doctor`, `call` command routing.
+- [x] Add unit test for command parsing.
+- [x] Commit: `feat: scaffold computer use cli`
 
 ### Task 2: Create Swift runtime helper skeleton
 
-- [ ] Create Swift package under `macos/`.
-- [ ] Implement JSON line request/response loop over stdio.
-- [ ] Add `runtime.ping` method.
-- [ ] Add Node runtime client that starts helper subprocess.
-- [ ] Add integration test for ping.
-- [ ] Commit: `feat: add macos runtime helper`
+- [x] Create Swift package under `macos/`.
+- [x] Implement JSON line request/response loop over stdio.
+- [x] Add `runtime.ping` method.
+- [x] Add Node runtime client that starts helper subprocess.
+- [x] Add integration test for ping.
+- [x] Commit: `feat: add macos runtime helper`
 
 ## Chunk 2: MCP Surface
 
 ### Task 3: Register MCP tools and resources
 
-- [ ] Add MCP SDK.
-- [ ] Implement tools from [MCP 接口契约](../mcp-api.md).
+- [x] Add MCP SDK.
+- [x] Implement tools from [MCP 接口契约](../mcp-api.md).
 - [ ] Start with fake runtime only for contract tests.
-- [ ] Return stable error shape.
-- [ ] Add `tools/list` snapshot tests.
-- [ ] Commit: `feat: expose computer use mcp tools`
+- [x] Return stable error shape.
+- [x] Add `tools/list` snapshot tests.
+- [x] Commit: `feat: expose computer use mcp tools`
 
 ### Task 4: Implement session engine
 
-- [ ] Create session ids, step ids and status transitions.
-- [ ] Add per-session element cache placeholder.
+- [x] Create session ids, step ids and status transitions.
+- [x] Add per-session element cache placeholder.
 - [ ] Ensure same session actions are serialized.
 - [ ] Add timeout and cancel support.
 - [ ] Commit: `feat: add computer use sessions`
@@ -80,82 +80,82 @@ Before coding, implementers must read:
 
 ### Task 5: Permission doctor
 
-- [ ] Implement Screen Recording permission check.
-- [ ] Implement Accessibility trust check.
-- [ ] Implement window listing capability check.
-- [ ] Print actionable `doctor` output.
-- [ ] Add tests for parsing helper responses.
-- [ ] Commit: `feat: add macos permission doctor`
+- [x] Implement Screen Recording permission check.
+- [x] Implement Accessibility trust check.
+- [x] Implement window listing capability check.
+- [x] Print actionable `doctor` output.
+- [x] Add tests for parsing helper responses.
+- [x] Commit: `feat: add macos permission doctor`
 
 ### Task 6: Screenshot capture
 
-- [ ] Implement full display screenshot.
+- [x] Implement full display screenshot.
 - [ ] Add window/app screenshot if available.
-- [ ] Return dimensions, scale and artifact bytes.
-- [ ] Store screenshot artifacts from Node core.
-- [ ] Commit: `feat: capture macos screenshots`
+- [x] Return dimensions, scale and artifact bytes.
+- [x] Store screenshot artifacts from Node core.
+- [x] Commit: `feat: capture macos screenshots`
 
 ### Task 7: Accessibility tree extraction
 
-- [ ] Read active app/window tree.
-- [ ] Normalize role, label, title, value, frame and enabled state.
-- [ ] Apply depth/node limits.
+- [x] Read active app/window tree.
+- [x] Normalize role, label, title, value, frame and enabled state.
+- [x] Apply depth/node limits.
 - [ ] Redact sensitive values.
-- [ ] Generate short-lived element ids.
-- [ ] Commit: `feat: observe macos accessibility tree`
+- [x] Generate short-lived element ids.
+- [x] Commit: `feat: observe macos accessibility tree`
 
 ## Chunk 4: Actions
 
 ### Task 8: App and window activation
 
-- [ ] List running apps and windows.
-- [ ] Activate app by name or bundle id.
-- [ ] Wait for active app/window.
-- [ ] Enforce app policy before activation.
-- [ ] Commit: `feat: control macos app activation`
+- [x] List running apps and windows.
+- [x] Activate app by name or bundle id.
+- [x] Wait for active app/window.
+- [x] Enforce app policy before activation.
+- [x] Commit: `feat: control macos app activation`
 
 ### Task 9: Basic input execution
 
-- [ ] Implement `click`, `press_key`, `type_text`, `scroll`.
-- [ ] Prefer Accessibility action when target has element id.
-- [ ] Fall back to CGEvent only when target is coordinate-based.
-- [ ] Add post-action observe.
-- [ ] Commit: `feat: execute basic desktop actions`
+- [x] Implement `click`, `press_key`, `type_text`, `scroll`.
+- [x] Prefer Accessibility action when target has element id.
+- [x] Fall back to CGEvent only when target is coordinate-based.
+- [x] Add post-action observe.
+- [x] Commit: `feat: execute basic desktop actions`
 
 ### Task 10: Target resolution
 
 - [ ] Resolve element id, selector, text target and coordinates.
-- [ ] Return ambiguity with candidates.
-- [ ] Detect stale elements.
-- [ ] Add fixture tests for common ambiguity cases.
-- [ ] Commit: `feat: resolve computer use targets`
+- [x] Return ambiguity with candidates.
+- [x] Detect stale elements.
+- [x] Add fixture tests for common ambiguity cases.
+- [x] Commit: `feat: resolve computer use targets`
 
 ## Chunk 5: Safety and Audit
 
 ### Task 11: App and action policy
 
-- [ ] Parse `~/.operel/computer-use/config.toml`.
-- [ ] Implement allow/deny/prompt policy.
+- [x] Parse `~/.operel/computer-use/config.toml`.
+- [x] Implement allow/deny/prompt policy.
 - [ ] Add risk classifier for sensitive and destructive actions.
-- [ ] Return `approval_required` without executing risky actions.
-- [ ] Commit: `feat: enforce computer use policy`
+- [x] Return `approval_required` without executing risky actions.
+- [x] Commit: `feat: enforce computer use policy`
 
 ### Task 12: Artifact and audit store
 
-- [ ] Write audit JSONL per session.
+- [x] Write audit JSONL per session.
 - [ ] Save screenshots and tree snapshots.
-- [ ] Redact sensitive tool inputs.
-- [ ] Implement `export_session`.
-- [ ] Commit: `feat: record computer use audit artifacts`
+- [x] Redact sensitive tool inputs.
+- [x] Implement `export_session`.
+- [x] Commit: `feat: record computer use audit artifacts`
 
 ## Chunk 6: Verification and Packaging
 
 ### Task 13: Real Mac smoke
 
 - [ ] Run `doctor` on a signed local build.
-- [ ] Grant Screen Recording and Accessibility.
-- [ ] Run TextEdit observe/type smoke.
-- [ ] Export session and inspect artifacts.
+- [x] Grant Screen Recording and Accessibility.
+- [x] Run TextEdit observe/type smoke.
+- [x] Export session and inspect artifacts.
 - [ ] Document exact commands in release notes.
 - [ ] Commit: `test: add macos smoke checklist`
 
@@ -163,9 +163,9 @@ Before coding, implementers must read:
 
 - [ ] Install MCP config for Codex.
 - [ ] Install MCP config for Claude Code or another MCP client.
-- [ ] Verify `tools/list`.
-- [ ] Run one low-risk GUI task.
-- [ ] Commit: `test: add agent integration smoke`
+- [x] Verify `tools/list`.
+- [x] Run one low-risk GUI task.
+- [x] Commit: `test: add agent integration smoke`
 
 ## Release Gate
 
