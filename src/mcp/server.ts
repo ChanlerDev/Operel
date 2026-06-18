@@ -544,8 +544,10 @@ async function withOptionalSessionStep(
   tool: string,
   run: () => Promise<Record<string, unknown>>,
 ) {
-  const sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
-  if (sessionId && !sessionStore.getSession(sessionId)) {
+  let sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
+  if (!sessionId) {
+    sessionId = sessionStore.startSession({ task: `Ad hoc ${tool}` }).session_id;
+  } else if (!sessionStore.getSession(sessionId)) {
     return formatStructuredResult({
       error: {
         code: "session_expired",
@@ -556,14 +558,13 @@ async function withOptionalSessionStep(
   }
 
   const result = await run();
-  if (sessionId) {
-    sessionStore.recordStep(sessionId, {
-      tool,
-      input: args,
-      result,
-    });
-  }
-  return formatStructuredResult(result);
+  const resultWithSession = { ...result, session_id: sessionId };
+  sessionStore.recordStep(sessionId, {
+    tool,
+    input: args,
+    result: resultWithSession,
+  });
+  return formatStructuredResult(resultWithSession);
 }
 
 function registerPrompts(server: McpServer): void {

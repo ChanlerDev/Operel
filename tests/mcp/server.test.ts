@@ -387,8 +387,9 @@ describe("Computer Use MCP server", () => {
         arguments: {},
       });
 
-      expect(result.structuredContent).toEqual({
+      expect(result.structuredContent).toMatchObject({
         released: ["cmd", "shift", "option", "control"],
+        session_id: expect.stringMatching(/^sess_/),
       });
     } finally {
       await server.close();
@@ -407,8 +408,9 @@ describe("Computer Use MCP server", () => {
         },
       });
 
-      expect(result.structuredContent).toEqual({
+      expect(result.structuredContent).toMatchObject({
         performed: true,
+        session_id: expect.stringMatching(/^sess_/),
       });
     } finally {
       await server.close();
@@ -449,9 +451,10 @@ describe("Computer Use MCP server", () => {
         },
       });
 
-      expect(result.structuredContent).toEqual({
+      expect(result.structuredContent).toMatchObject({
         strategy_used: "paste",
         clipboard_restored: true,
+        session_id: expect.stringMatching(/^sess_/),
       });
     } finally {
       await server.close();
@@ -472,8 +475,9 @@ describe("Computer Use MCP server", () => {
         },
       });
 
-      expect(result.structuredContent).toEqual({
+      expect(result.structuredContent).toMatchObject({
         performed: true,
+        session_id: expect.stringMatching(/^sess_/),
       });
     } finally {
       await server.close();
@@ -569,7 +573,11 @@ describe("Computer Use MCP server", () => {
   });
 
   it("waits through MCP", async () => {
-    const { client, server } = await connectTestClient();
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "adhoc",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
 
     try {
       const result = await client.callTool({
@@ -577,9 +585,16 @@ describe("Computer Use MCP server", () => {
         arguments: { seconds: 0 },
       });
 
-      expect(result.structuredContent).toEqual({
+      expect(result.structuredContent).toMatchObject({
         waited_ms: 0,
+        session_id: "sess_adhoc",
       });
+      expect(sessionStore.listSessions()).toMatchObject([
+        {
+          session_id: "sess_adhoc",
+          task: "Ad hoc wait",
+        },
+      ]);
     } finally {
       await server.close();
     }
