@@ -184,7 +184,7 @@ MVP is exactly this slice:
 
 - `operel-computer-use mcp` starts a valid MCP server over stdio.
 - `operel-computer-use doctor` reports Screen Recording and Accessibility state.
-- `start_session`, `list_apps`, `observe`, `open_app`, `click`, `type_text`, `press_key`, `scroll`, `wait`, `recover`, `export_session`, `close_session` work through MCP.
+- `start_session`, `list_apps`, `observe`, `open_app`, `click`, `type_text`, `press_key`, `scroll`, `wait`, `recover`, `export_session`, `close_session`, `cancel_session` work through MCP.
 - Swift helper supports `runtime.ping`, `permissions.check`, `apps.list`, `app.activate`, `screen.capture`, `ax.read_tree`, `input.click`, `input.type_text`, `input.press_key`, `input.scroll`, `input.release_modifiers`.
 - TextEdit smoke passes on a real Mac with granted permissions.
 - Denied app action is blocked before runtime execution.

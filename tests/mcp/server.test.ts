@@ -44,6 +44,7 @@ describe("Computer Use MCP server", () => {
 
       expect(names).toEqual([
         "activate_window",
+        "cancel_session",
         "click",
         "close_session",
         "export_session",
@@ -59,6 +60,29 @@ describe("Computer Use MCP server", () => {
         "type_text",
         "wait",
       ]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns a stable error for unknown cancel_session ids", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "cancel_session",
+        arguments: {
+          session_id: "sess_missing",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "session_expired",
+          message: "Unknown session: sess_missing",
+          recoverable: false,
+        },
+      });
     } finally {
       await server.close();
     }

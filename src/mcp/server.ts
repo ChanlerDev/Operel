@@ -18,6 +18,7 @@ const mvpToolNames = [
   "list_windows",
   "observe",
   "close_session",
+  "cancel_session",
   "click",
   "type_text",
   "press_key",
@@ -92,6 +93,60 @@ function registerTools(
           formatStructuredResult(
             sessionStore.closeSession(args.session_id, args.reason as CloseSessionReason),
           ),
+      );
+      continue;
+    }
+
+    if (name === "cancel_session") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            session_id: z.string(),
+          },
+        },
+        async (args) => {
+          const session = sessionStore.getSession(args.session_id);
+          if (!session) {
+            return formatStructuredResult({
+              error: {
+                code: "session_expired",
+                message: `Unknown session: ${args.session_id}`,
+                recoverable: false,
+              },
+            });
+          }
+          if (session.status !== "active") {
+            return formatStructuredResult({
+              session_id: args.session_id,
+              status: session.status,
+              already_closed: true,
+            });
+          }
+
+          let recovery: Record<string, unknown>;
+          try {
+            recovery = await releaseModifiers();
+          } catch (error) {
+            recovery = {
+              performed: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+          sessionStore.recordStep(args.session_id, {
+            tool: "cancel_session",
+            input: args,
+            result: { recovery },
+          });
+          const cancelled = sessionStore.closeSession(args.session_id, "cancelled");
+          return formatStructuredResult({
+            ...cancelled,
+            recovery,
+          });
+        },
       );
       continue;
     }
@@ -763,6 +818,8 @@ function descriptionForTool(name: string): string {
       return "Capture current screen and accessibility state.";
     case "close_session":
       return "Close a Computer Use session.";
+    case "cancel_session":
+      return "Cancel a running Computer Use session and run best-effort recovery.";
     case "permission_check":
       return "Return machine-readable permission diagnostics.";
     default:

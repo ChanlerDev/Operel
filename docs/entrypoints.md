@@ -48,7 +48,7 @@ MCP client 不应直接知道 Swift helper 的存在。
 3. `open_app({ "app": "TextEdit" })`
 4. `observe({ "session_id": "sess_...", "app": "TextEdit" })`
 5. Agent 根据 screenshot URI 和 elements 判断状态。
-6. `close_session({ "session_id": "sess_...", "reason": "completed" })`
+6. 任务完成时调用 `close_session({ "session_id": "sess_...", "reason": "completed" })`；需要中断时调用 `cancel_session({ "session_id": "sess_..." })`。
 
 ### 输入文本任务
 
@@ -59,7 +59,7 @@ MCP client 不应直接知道 Swift helper 的存在。
 5. `type_text({ "text": "hello from operel" })`
 6. `observe`
 7. `export_session`
-8. `close_session`
+8. `close_session`，或在需要中断时调用 `cancel_session`
 
 ### 风险动作任务
 
