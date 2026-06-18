@@ -33,4 +33,34 @@ describe("ArtifactStore", () => {
     expect(existsSync(artifact.path)).toBe(true);
     expect(readFileSync(artifact.path, "utf8")).toBe("png-bytes");
   });
+
+  it("uses OPEREL_COMPUTER_USE_HOME as the default root", () => {
+    const previous = process.env.OPEREL_COMPUTER_USE_HOME;
+    const root = mkdtempSync(join(tmpdir(), "operel-artifacts-env-"));
+    process.env.OPEREL_COMPUTER_USE_HOME = root;
+
+    try {
+      const source = join(root, "source.png");
+      writeFileSync(source, "png-bytes");
+      const store = new ArtifactStore({
+        id: () => "envid",
+      });
+
+      const artifact = store.saveFileArtifact({
+        session_id: "sess_env",
+        kind: "screenshot",
+        source_path: source,
+        extension: "png",
+        mime_type: "image/png",
+      });
+
+      expect(artifact.path).toContain(root);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPEREL_COMPUTER_USE_HOME;
+      } else {
+        process.env.OPEREL_COMPUTER_USE_HOME = previous;
+      }
+    }
+  });
 });

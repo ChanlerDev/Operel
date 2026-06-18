@@ -46,7 +46,8 @@ export class ArtifactStore {
   private readonly id: () => string;
 
   constructor(options: ArtifactStoreOptions = {}) {
-    this.root = options.root ?? join(process.env.HOME ?? process.cwd(), ".operel/computer-use");
+    this.root =
+      options.root ?? process.env.OPEREL_COMPUTER_USE_HOME ?? join(process.env.HOME ?? process.cwd(), ".operel/computer-use");
     this.id = options.id ?? (() => randomUUID());
   }
 
