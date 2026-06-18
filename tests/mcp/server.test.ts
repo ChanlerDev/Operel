@@ -1,13 +1,21 @@
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 
+import { ArtifactStore } from "../../src/core/artifacts.js";
 import { SessionStore } from "../../src/core/session.js";
 import { createComputerUseServer } from "../../src/mcp/server.js";
 
-async function connectTestClient(sessionStore = new SessionStore()) {
+async function connectTestClient(
+  sessionStore = new SessionStore(),
+  artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-mcp-artifacts-")) }),
+) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createComputerUseServer({ sessionStore });
+  const server = createComputerUseServer({ sessionStore, artifactStore });
   const client = new Client(
     { name: "operel-test-client", version: "0.1.0" },
     { capabilities: {} },
@@ -214,6 +222,46 @@ describe("Computer Use MCP server", () => {
 
       expect(result.structuredContent).toMatchObject({
         active_app: expect.any(String),
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("observes a session with a screenshot artifact", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "observeid",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Observe screen" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          session_id: sessionId,
+          include_screenshot: true,
+          include_accessibility_tree: false,
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        session_id: sessionId,
+        screen: {
+          screenshot_uri: expect.stringMatching(
+            new RegExp(`^operel://sessions/${sessionId}/artifacts/artifact_`),
+          ),
+          width: expect.any(Number),
+          height: expect.any(Number),
+          scale: expect.any(Number),
+        },
+        elements: [],
       });
     } finally {
       await server.close();

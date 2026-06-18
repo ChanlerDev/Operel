@@ -1,10 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
+import { ArtifactStore } from "../core/artifacts.js";
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
 import { activateApp } from "../runtime/activate.js";
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
+import { captureScreen } from "../runtime/screen.js";
 
 const mvpToolNames = [
   "start_session",
@@ -26,23 +28,29 @@ const mvpToolNames = [
 
 export type ComputerUseServerOptions = {
   sessionStore?: SessionStore;
+  artifactStore?: ArtifactStore;
 };
 
 export function createComputerUseServer(options: ComputerUseServerOptions = {}): McpServer {
   const sessionStore = options.sessionStore ?? new SessionStore();
+  const artifactStore = options.artifactStore ?? new ArtifactStore();
   const server = new McpServer({
     name: "operel-computer-use",
     version: "0.1.0",
   });
 
-  registerTools(server, sessionStore);
+  registerTools(server, sessionStore, artifactStore);
   registerResources(server, sessionStore);
   registerPrompts(server);
 
   return server;
 }
 
-function registerTools(server: McpServer, sessionStore: SessionStore): void {
+function registerTools(
+  server: McpServer,
+  sessionStore: SessionStore,
+  artifactStore: ArtifactStore,
+): void {
   for (const name of mvpToolNames) {
     if (name === "start_session") {
       server.registerTool(
@@ -77,6 +85,58 @@ function registerTools(server: McpServer, sessionStore: SessionStore): void {
           formatStructuredResult(
             sessionStore.closeSession(args.session_id, args.reason as CloseSessionReason),
           ),
+      );
+      continue;
+    }
+
+    if (name === "observe") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            session_id: z.string(),
+            app: z.string().optional(),
+            include_screenshot: z.boolean().optional(),
+            include_accessibility_tree: z.boolean().optional(),
+            max_tree_depth: z.number().optional(),
+          },
+        },
+        async (args) => {
+          const screenshot = args.include_screenshot === false ? undefined : await captureScreen();
+          const artifact = screenshot
+            ? artifactStore.saveFileArtifact({
+                session_id: args.session_id,
+                kind: "screenshot",
+                source_path: screenshot.tmp_path,
+                extension: "png",
+                mime_type: "image/png",
+              })
+            : undefined;
+          const result = {
+            session_id: args.session_id,
+            screen: screenshot
+              ? {
+                  width: screenshot.width,
+                  height: screenshot.height,
+                  scale: screenshot.scale,
+                  pixel_width: screenshot.pixel_width,
+                  pixel_height: screenshot.pixel_height,
+                  display_id: screenshot.display_id,
+                  coordinate_space: screenshot.coordinate_space,
+                  screenshot_uri: artifact?.uri,
+                }
+              : undefined,
+            elements: [],
+          };
+          sessionStore.recordStep(args.session_id, {
+            tool: "observe",
+            input: args,
+            result,
+          });
+          return formatStructuredResult(result);
+        },
       );
       continue;
     }

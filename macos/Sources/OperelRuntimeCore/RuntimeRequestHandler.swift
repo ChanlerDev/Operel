@@ -2,6 +2,7 @@ import Foundation
 import ApplicationServices
 import AppKit
 import CoreGraphics
+import ImageIO
 
 public struct RuntimeRequestHandler {
     private let version: String
@@ -51,6 +52,8 @@ public struct RuntimeRequestHandler {
             ))
         case "app.activate":
             return try encode(activateAppResponse(request: request))
+        case "screen.capture":
+            return try encode(screenCaptureResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -115,6 +118,7 @@ private enum RuntimeProtocolError: Error {
 private enum JSONValue: Encodable {
     case string(String)
     case int(Int)
+    case double(Double)
     case bool(Bool)
     case array([JSONValue])
     case object([String: JSONValue])
@@ -125,6 +129,9 @@ private enum JSONValue: Encodable {
             var container = encoder.singleValueContainer()
             try container.encode(value)
         case let .int(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .double(value):
             var container = encoder.singleValueContainer()
             try container.encode(value)
         case let .bool(value):
@@ -142,6 +149,76 @@ private enum JSONValue: Encodable {
             }
         }
     }
+}
+
+private func screenCaptureResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    let displayID = CGMainDisplayID()
+
+    guard CGPreflightScreenCaptureAccess() else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "permission_missing",
+                message: "Screen Recording permission is missing."
+            )
+        )
+    }
+
+    guard let image = CGDisplayCreateImage(displayID) else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "action_failed",
+                message: "Unable to capture the main display."
+            )
+        )
+    }
+
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("operel-capture-\(UUID().uuidString)")
+        .appendingPathExtension("png")
+
+    guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+        throw RuntimeProtocolError.encodingFailed
+    }
+
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "action_failed",
+                message: "Unable to write screenshot PNG."
+            )
+        )
+    }
+
+    let bounds = CGDisplayBounds(displayID)
+    let pixelWidth = CGDisplayPixelsWide(displayID)
+    let pixelHeight = CGDisplayPixelsHigh(displayID)
+    let scale = bounds.width > 0 ? Double(pixelWidth) / bounds.width : 1
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "tmp_path": .string(url.path),
+            "width": .int(Int(bounds.width)),
+            "height": .int(Int(bounds.height)),
+            "pixel_width": .int(pixelWidth),
+            "pixel_height": .int(pixelHeight),
+            "scale": .double(scale),
+            "display_id": .int(Int(displayID)),
+            "coordinate_space": .string("logical_points")
+        ]),
+        error: nil
+    )
 }
 
 private func listRunningApps() -> [JSONValue] {
