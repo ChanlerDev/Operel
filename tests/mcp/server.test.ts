@@ -2,11 +2,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 
+import { SessionStore } from "../../src/core/session.js";
 import { createComputerUseServer } from "../../src/mcp/server.js";
 
-async function connectTestClient() {
+async function connectTestClient(sessionStore = new SessionStore()) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createComputerUseServer();
+  const server = createComputerUseServer({ sessionStore });
   const client = new Client(
     { name: "operel-test-client", version: "0.1.0" },
     { capabilities: {} },
@@ -70,6 +71,73 @@ describe("Computer Use MCP server", () => {
         "computer_use_operator",
         "computer_use_safety",
       ]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("creates and closes sessions through MCP tools", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "mcpid",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const created = await client.callTool({
+        name: "start_session",
+        arguments: {
+          task: "Inspect TextEdit",
+          app: "TextEdit",
+        },
+      });
+
+      expect(created.structuredContent).toMatchObject({
+        session_id: "sess_mcpid",
+        status: "active",
+        task: "Inspect TextEdit",
+        app: "TextEdit",
+      });
+
+      const closed = await client.callTool({
+        name: "close_session",
+        arguments: {
+          session_id: "sess_mcpid",
+          reason: "completed",
+        },
+      });
+
+      expect(closed.structuredContent).toMatchObject({
+        session_id: "sess_mcpid",
+        status: "completed",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads the session resource", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "resourceid",
+    });
+    sessionStore.startSession({ task: "Read sessions" });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const resource = await client.readResource({ uri: "operel://sessions" });
+      const firstContent = resource.contents[0];
+      const text = firstContent && "text" in firstContent ? firstContent.text : undefined;
+
+      expect(JSON.parse(String(text))).toMatchObject({
+        sessions: [
+          {
+            session_id: "sess_resourceid",
+            task: "Read sessions",
+            status: "active",
+          },
+        ],
+      });
     } finally {
       await server.close();
     }

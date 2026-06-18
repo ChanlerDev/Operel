@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
+import { type CloseSessionReason, SessionStore } from "../core/session.js";
+
 const mvpToolNames = [
   "start_session",
   "list_apps",
@@ -19,21 +21,63 @@ const mvpToolNames = [
   "permission_check",
 ] as const;
 
-export function createComputerUseServer(): McpServer {
+export type ComputerUseServerOptions = {
+  sessionStore?: SessionStore;
+};
+
+export function createComputerUseServer(options: ComputerUseServerOptions = {}): McpServer {
+  const sessionStore = options.sessionStore ?? new SessionStore();
   const server = new McpServer({
     name: "operel-computer-use",
     version: "0.1.0",
   });
 
-  registerTools(server);
-  registerResources(server);
+  registerTools(server, sessionStore);
+  registerResources(server, sessionStore);
   registerPrompts(server);
 
   return server;
 }
 
-function registerTools(server: McpServer): void {
+function registerTools(server: McpServer, sessionStore: SessionStore): void {
   for (const name of mvpToolNames) {
+    if (name === "start_session") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            task: z.string(),
+            app: z.string().optional(),
+            window_title: z.string().optional(),
+            risk_profile: z.enum(["low", "normal", "high"]).optional(),
+          },
+        },
+        async (args) => formatStructuredResult(sessionStore.startSession(args)),
+      );
+      continue;
+    }
+
+    if (name === "close_session") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            session_id: z.string(),
+            reason: z.enum(["completed", "cancelled", "expired", "blocked"]).default("completed"),
+          },
+        },
+        async (args) =>
+          formatStructuredResult(
+            sessionStore.closeSession(args.session_id, args.reason as CloseSessionReason),
+          ),
+      );
+      continue;
+    }
+
     server.registerTool(
       name,
       {
@@ -41,31 +85,12 @@ function registerTools(server: McpServer): void {
         description: descriptionForTool(name),
         inputSchema: z.object({}).passthrough(),
       },
-      async (args) => ({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                status: "not_implemented",
-                tool: name,
-                args,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        structuredContent: {
-          status: "not_implemented",
-          tool: name,
-        },
-      }),
+      async (args) => formatStructuredResult({ status: "not_implemented", tool: name, args }),
     );
   }
 }
 
-function registerResources(server: McpServer): void {
+function registerResources(server: McpServer, sessionStore: SessionStore): void {
   server.registerResource(
     "policy",
     "operel://policy",
@@ -109,11 +134,23 @@ function registerResources(server: McpServer): void {
         {
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ sessions: [] }, null, 2),
+          text: JSON.stringify({ sessions: sessionStore.listSessions() }, null, 2),
         },
       ],
     }),
   );
+}
+
+function formatStructuredResult(structuredContent: Record<string, unknown>) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(structuredContent, null, 2),
+      },
+    ],
+    structuredContent,
+  };
 }
 
 function registerPrompts(server: McpServer): void {
