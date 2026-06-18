@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { parseCliArgs } from "./args.js";
+import { loadConfig } from "../core/config.js";
+import { PolicyEngine } from "../core/policy.js";
 import { createComputerUseServer } from "../mcp/server.js";
 import { RuntimeClient } from "../runtime/client.js";
 import { checkPermissions } from "../runtime/permissions.js";
@@ -114,7 +116,12 @@ async function defaultCall(tool: string, args: unknown): Promise<unknown> {
 }
 
 async function defaultStartMcp(): Promise<void> {
-  const server = createComputerUseServer();
+  const config = loadConfig();
+  const server = createComputerUseServer({
+    policy: new PolicyEngine({
+      apps: config.apps,
+    }),
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
