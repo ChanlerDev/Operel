@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -500,6 +500,31 @@ describe("Computer Use MCP server", () => {
           recoverable: true,
         },
       });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("records a screenshot artifact for coordinate clicks", async () => {
+    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-click-artifacts-"));
+    const artifactStore = new ArtifactStore({ root: artifactRoot });
+    const { client, server } = await connectTestClient(undefined, artifactStore);
+
+    try {
+      const result = await client.callTool({
+        name: "click",
+        arguments: {
+          x: 0,
+          y: 0,
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        performed: true,
+        session_id: expect.stringMatching(/^sess_/),
+        screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_.*\/artifacts\/artifact_/),
+      });
+      expect(existsSync((result.structuredContent as { screenshot_path: string }).screenshot_path)).toBe(true);
     } finally {
       await server.close();
     }

@@ -392,7 +392,22 @@ function registerTools(
               }
               clickInput = { ...args, ...resolution.click };
             }
-            return await withOptionalSessionStep(sessionStore, args, name, () => click(clickInput));
+            return await withOptionalSessionStep(sessionStore, args, name, async (sessionId) => {
+              const screenshot = await captureScreen();
+              const artifact = artifactStore.saveFileArtifact({
+                session_id: sessionId,
+                kind: "screenshot",
+                source_path: screenshot.tmp_path,
+                extension: "png",
+                mime_type: "image/png",
+              });
+              return {
+                ...(await click(clickInput)),
+                screenshot_uri: artifact.uri,
+                screenshot_path: artifact.path,
+                coordinate_space: screenshot.coordinate_space,
+              };
+            });
           } catch (error) {
             return formatStructuredResult({
               error: {
@@ -542,7 +557,7 @@ async function withOptionalSessionStep(
   sessionStore: SessionStore,
   args: Record<string, unknown>,
   tool: string,
-  run: () => Promise<Record<string, unknown>>,
+  run: (sessionId: string) => Promise<Record<string, unknown>>,
 ) {
   let sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
   if (!sessionId) {
@@ -557,7 +572,7 @@ async function withOptionalSessionStep(
     });
   }
 
-  const result = await run();
+  const result = await run(sessionId);
   const resultWithSession = { ...result, session_id: sessionId };
   sessionStore.recordStep(sessionId, {
     tool,
