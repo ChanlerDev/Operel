@@ -37,7 +37,9 @@ public struct RuntimeRequestHandler {
                     "screen_recording": .string(checkScreenRecordingPermission()),
                     "accessibility": .string(checkAccessibilityPermission()),
                     "automation": .string("unknown"),
-                    "input_monitoring": .string("not_requested")
+                    "input_monitoring": .string("not_requested"),
+                    "binary_path": .string(currentExecutablePath()),
+                    "code_signing": codeSigningDiagnostics()
                 ]),
                 error: nil
             ))
@@ -97,6 +99,64 @@ private func checkScreenRecordingPermission() -> String {
 
 private func checkAccessibilityPermission() -> String {
     AXIsProcessTrusted() ? "granted" : "missing"
+}
+
+private func currentExecutablePath() -> String {
+    Bundle.main.executableURL?.path ?? CommandLine.arguments.first ?? ""
+}
+
+private func codeSigningDiagnostics() -> JSONValue {
+    let path = currentExecutablePath()
+    guard !path.isEmpty else {
+        return .object([
+            "status": .string("unknown"),
+            "identity": .string("unknown"),
+            "team_identifier": .string("")
+        ])
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    process.arguments = ["-dv", "--verbose=4", path]
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return .object([
+            "status": .string("unknown"),
+            "identity": .string("unknown"),
+            "team_identifier": .string("")
+        ])
+    }
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let output = String(data: data, encoding: .utf8) ?? ""
+    let status: String
+    if output.contains("Signature=adhoc") {
+        status = "adhoc"
+    } else if output.contains("code object is not signed") || process.terminationStatus != 0 {
+        status = "unsigned"
+    } else {
+        status = "signed"
+    }
+
+    return .object([
+        "status": .string(status),
+        "identity": .string(firstCodesignValue(output: output, prefix: "Authority=") ?? (status == "adhoc" ? "adhoc" : "")),
+        "team_identifier": .string(firstCodesignValue(output: output, prefix: "TeamIdentifier=") ?? "")
+    ])
+}
+
+private func firstCodesignValue(output: String, prefix: String) -> String? {
+    output
+        .split(separator: "\n")
+        .first { $0.hasPrefix(prefix) }
+        .map { String($0.dropFirst(prefix.count)) }
 }
 
 private struct RuntimeRequest: Decodable {

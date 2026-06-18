@@ -9,6 +9,12 @@ export type PermissionDiagnostics = {
   accessibility: PermissionState;
   automation: PermissionState;
   input_monitoring: PermissionState;
+  binary_path: string;
+  code_signing: {
+    status: "signed" | "adhoc" | "unsigned" | "unknown";
+    identity: string;
+    team_identifier: string;
+  };
   helper_status: "ok" | "failed";
   next_steps: string[];
 };
@@ -32,6 +38,12 @@ export async function checkPermissions(): Promise<PermissionDiagnostics> {
       accessibility: "unknown",
       automation: "unknown",
       input_monitoring: "unknown",
+      binary_path: "",
+      code_signing: {
+        status: "unknown",
+        identity: "unknown",
+        team_identifier: "",
+      },
       helper_status: "failed",
       next_steps: [error instanceof Error ? error.message : String(error)],
     };
@@ -47,6 +59,18 @@ function normalizePermissions(result: unknown): Omit<PermissionDiagnostics, "hel
     accessibility: normalizePermission(value.accessibility),
     automation: normalizePermission(value.automation),
     input_monitoring: normalizePermission(value.input_monitoring),
+    binary_path: stringValue(value.binary_path),
+    code_signing: normalizeCodeSigning(value.code_signing),
+  };
+}
+
+function normalizeCodeSigning(value: unknown): PermissionDiagnostics["code_signing"] {
+  const object = isObject(value) ? value : {};
+  const status = object.status;
+  return {
+    status: status === "signed" || status === "adhoc" || status === "unsigned" || status === "unknown" ? status : "unknown",
+    identity: stringValue(object.identity) || "unknown",
+    team_identifier: stringValue(object.team_identifier),
   };
 }
 
@@ -70,7 +94,15 @@ function nextStepsFor(
     steps.push("Grant Accessibility permission in System Settings > Privacy & Security.");
   }
 
+  if (diagnostics.code_signing.status === "adhoc") {
+    steps.push("Runtime helper is ad-hoc signed; macOS permissions may need to be re-granted after rebuilds.");
+  }
+
   return steps;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

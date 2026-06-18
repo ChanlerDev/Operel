@@ -12,6 +12,14 @@ import { checkPermissions } from "../runtime/permissions.js";
 export type DoctorResult = {
   screen_recording: string;
   accessibility: string;
+  automation?: string;
+  input_monitoring?: string;
+  binary_path?: string;
+  code_signing?: {
+    status: string;
+    identity: string;
+    team_identifier: string;
+  };
   helper_status: string;
   next_steps: string[];
 };
@@ -28,6 +36,14 @@ export type CliServices = {
 const defaultDoctorResult: DoctorResult = {
   screen_recording: "unknown",
   accessibility: "unknown",
+  automation: "unknown",
+  input_monitoring: "unknown",
+  binary_path: "",
+  code_signing: {
+    status: "unknown",
+    identity: "unknown",
+    team_identifier: "",
+  },
   helper_status: "unknown",
   next_steps: ["Runtime doctor is not fully implemented yet."],
 };
@@ -120,6 +136,8 @@ function formatDoctor(result: DoctorResult): string {
 
   return [
     "Operel Computer Use Doctor",
+    `Binary path: ${result.binary_path || "unknown"}`,
+    `Code signing: ${result.code_signing?.status ?? "unknown"} (${result.code_signing?.identity ?? "unknown"})`,
     `Screen Recording: ${result.screen_recording}`,
     `Accessibility: ${result.accessibility}`,
     `Runtime helper: ${result.helper_status}`,

@@ -36,6 +36,30 @@ describe("runCli", () => {
     });
   });
 
+  it("prints human-readable signing diagnostics", async () => {
+    const writes: string[] = [];
+
+    const exitCode = await runCli(["doctor"], {
+      write: (chunk) => writes.push(chunk),
+      doctor: async () => ({
+        screen_recording: "unknown",
+        accessibility: "unknown",
+        binary_path: "/tmp/OperelRuntime",
+        code_signing: {
+          status: "adhoc",
+          identity: "adhoc",
+          team_identifier: "",
+        },
+        helper_status: "ok",
+        next_steps: [],
+      }),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(writes.join("")).toContain("Binary path: /tmp/OperelRuntime");
+    expect(writes.join("")).toContain("Code signing: adhoc (adhoc)");
+  });
+
   it("invokes call command with parsed args", async () => {
     const writes: string[] = [];
     const calls: unknown[] = [];

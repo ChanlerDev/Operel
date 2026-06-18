@@ -30,6 +30,12 @@ describe("OperelRuntime permissions.check", () => {
         accessibility: expect.stringMatching(/^(granted|missing|unknown)$/),
         automation: expect.stringMatching(/^(not_requested|unknown)$/),
         input_monitoring: expect.stringMatching(/^(not_requested|unknown)$/),
+        binary_path: expect.stringContaining("OperelRuntime"),
+        code_signing: {
+          status: expect.stringMatching(/^(signed|adhoc|unsigned|unknown)$/),
+          identity: expect.any(String),
+          team_identifier: expect.any(String),
+        },
       });
     } finally {
       await client.close();
