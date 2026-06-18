@@ -125,6 +125,13 @@ function registerTools(
                 mime_type: "image/png",
               })
             : undefined;
+          const accessibilityArtifact = accessibility
+            ? artifactStore.saveJsonArtifact({
+                session_id: args.session_id,
+                kind: "accessibility_tree",
+                value: accessibility,
+              })
+            : undefined;
           const elements = accessibility
             ? sessionStore.registerElements(
                 args.session_id,
@@ -135,6 +142,8 @@ function registerTools(
           const result = {
             session_id: args.session_id,
             accessibility_tree_id: accessibility?.tree_id,
+            accessibility_tree_uri: accessibilityArtifact?.uri,
+            accessibility_tree_path: accessibilityArtifact?.path,
             screen: screenshot
               ? {
                   width: screenshot.width,

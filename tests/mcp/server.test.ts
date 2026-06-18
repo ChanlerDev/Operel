@@ -356,7 +356,11 @@ describe("Computer Use MCP server", () => {
       now: () => new Date("2026-06-18T00:00:00.000Z"),
       id: () => "axobserve",
     });
-    const { client, server } = await connectTestClient(sessionStore);
+    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-ax-artifacts-"));
+    const { client, server } = await connectTestClient(
+      sessionStore,
+      new ArtifactStore({ root: artifactRoot }),
+    );
 
     try {
       const session = await client.callTool({
@@ -378,8 +382,12 @@ describe("Computer Use MCP server", () => {
       expect(result.structuredContent).toMatchObject({
         session_id: sessionId,
         accessibility_tree_id: expect.stringMatching(/^tree_/),
+        accessibility_tree_uri: expect.stringMatching(
+          new RegExp(`^operel://sessions/${sessionId}/artifacts/artifact_`),
+        ),
         elements: expect.any(Array),
       });
+      expect(existsSync((result.structuredContent as { accessibility_tree_path: string }).accessibility_tree_path)).toBe(true);
       const elements = (result.structuredContent as { elements: Array<{ element_id?: string }> }).elements;
       if (elements.length > 0) {
         expect(elements[0].element_id).toMatch(/^el_/);

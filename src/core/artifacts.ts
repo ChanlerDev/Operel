@@ -14,6 +14,12 @@ export type FileArtifactInput = {
   mime_type: string;
 };
 
+export type JsonArtifactInput = {
+  session_id: string;
+  kind: ArtifactKind;
+  value: unknown;
+};
+
 export type Artifact = {
   artifact_id: string;
   session_id: string;
@@ -67,6 +73,24 @@ export class ArtifactStore {
       uri: `operel://sessions/${input.session_id}/artifacts/${artifactId}`,
       path,
       mime_type: input.mime_type || mimeTypeForExtension(basename(path)),
+    };
+  }
+
+  saveJsonArtifact(input: JsonArtifactInput): Artifact {
+    const artifactId = `artifact_${this.id()}`;
+    const sessionDir = join(this.root, "sessions", input.session_id, "artifacts");
+    const path = join(sessionDir, `${artifactId}.json`);
+
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(path, JSON.stringify(redactForExport(input.value), null, 2));
+
+    return {
+      artifact_id: artifactId,
+      session_id: input.session_id,
+      kind: input.kind,
+      uri: `operel://sessions/${input.session_id}/artifacts/${artifactId}`,
+      path,
+      mime_type: "application/json",
     };
   }
 
