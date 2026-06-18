@@ -60,7 +60,7 @@ const session = await call("start_session", {
   task: "TextEdit smoke",
   app: "TextEdit",
 });
-await call("open_app", { app: "TextEdit" });
+await call("open_app", { session_id: session.session_id, app: "TextEdit" });
 await call("observe", {
   session_id: session.session_id,
   app: "TextEdit",
@@ -69,6 +69,7 @@ await call("observe", {
   max_tree_depth: 3,
 });
 await call("type_text", {
+  session_id: session.session_id,
   text: `hello from operel smoke ${new Date().toISOString()}`,
 });
 const exported = await call("export_session", {

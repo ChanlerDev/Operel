@@ -493,6 +493,43 @@ describe("Computer Use MCP server", () => {
     }
   });
 
+  it("records action steps with session_id for export audit", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "auditmcp",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Audit from MCP" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      await client.callTool({
+        name: "wait",
+        arguments: { session_id: sessionId, seconds: 0 },
+      });
+
+      const steps = sessionStore.listSteps(sessionId);
+      expect(steps).toMatchObject([
+        {
+          tool: "wait",
+          input: {
+            session_id: sessionId,
+            seconds: 0,
+          },
+          result: {
+            waited_ms: 0,
+          },
+        },
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("waits through MCP", async () => {
     const { client, server } = await connectTestClient();
 

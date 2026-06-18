@@ -216,6 +216,7 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             app: z.string().optional(),
             bundle_id: z.string().optional(),
             window_id: z.string().optional(),
@@ -243,7 +244,7 @@ function registerTools(
               },
             });
           }
-          return formatStructuredResult(await activateApp(args));
+          return withOptionalSessionStep(sessionStore, args, name, () => activateApp(args));
         },
       );
       continue;
@@ -257,7 +258,7 @@ function registerTools(
           description: descriptionForTool(name),
           inputSchema: z.object({}).passthrough(),
         },
-        async () => formatStructuredResult(await releaseModifiers()),
+        async (args) => withOptionalSessionStep(sessionStore, args, name, () => releaseModifiers()),
       );
       continue;
     }
@@ -269,11 +270,12 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             key: z.string(),
             modifiers: z.array(z.string()).optional(),
           },
         },
-        async (args) => formatStructuredResult(await pressKey(args)),
+        async (args) => withOptionalSessionStep(sessionStore, args, name, () => pressKey(args)),
       );
       continue;
     }
@@ -285,6 +287,7 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             text: z.string(),
             sensitive: z.boolean().optional(),
           },
@@ -300,7 +303,9 @@ function registerTools(
               },
             });
           }
-          return formatStructuredResult(await typeText({ text: args.text, strategy: "paste" }));
+          return withOptionalSessionStep(sessionStore, args, name, () =>
+            typeText({ text: args.text, strategy: "paste" }),
+          );
         },
       );
       continue;
@@ -313,13 +318,14 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             x: z.number().optional(),
             y: z.number().optional(),
             delta_x: z.number().optional(),
             delta_y: z.number().optional(),
           },
         },
-        async (args) => formatStructuredResult(await scroll(args)),
+        async (args) => withOptionalSessionStep(sessionStore, args, name, () => scroll(args)),
       );
       continue;
     }
@@ -331,6 +337,7 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             x: z.number().optional(),
             y: z.number().optional(),
             button: z.enum(["left", "right"]).optional(),
@@ -339,7 +346,7 @@ function registerTools(
         },
         async (args) => {
           try {
-            return formatStructuredResult(await click(args));
+            return await withOptionalSessionStep(sessionStore, args, name, () => click(args));
           } catch (error) {
             return formatStructuredResult({
               error: {
@@ -393,15 +400,18 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
+            session_id: z.string().optional(),
             seconds: z.number().min(0).max(30).default(1),
           },
         },
         async (args) => {
-          const waitedMs = Math.round((args.seconds ?? 1) * 1000);
-          if (waitedMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, waitedMs));
-          }
-          return formatStructuredResult({ waited_ms: waitedMs });
+          return withOptionalSessionStep(sessionStore, args, name, async () => {
+            const waitedMs = Math.round((args.seconds ?? 1) * 1000);
+            if (waitedMs > 0) {
+              await new Promise((resolve) => setTimeout(resolve, waitedMs));
+            }
+            return { waited_ms: waitedMs };
+          });
         },
       );
       continue;
@@ -480,6 +490,34 @@ function formatStructuredResult(structuredContent: Record<string, unknown>) {
     ],
     structuredContent,
   };
+}
+
+async function withOptionalSessionStep(
+  sessionStore: SessionStore,
+  args: Record<string, unknown>,
+  tool: string,
+  run: () => Promise<Record<string, unknown>>,
+) {
+  const sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
+  if (sessionId && !sessionStore.getSession(sessionId)) {
+    return formatStructuredResult({
+      error: {
+        code: "session_expired",
+        message: `Unknown session: ${sessionId}`,
+        recoverable: false,
+      },
+    });
+  }
+
+  const result = await run();
+  if (sessionId) {
+    sessionStore.recordStep(sessionId, {
+      tool,
+      input: args,
+      result,
+    });
+  }
+  return formatStructuredResult(result);
 }
 
 function registerPrompts(server: McpServer): void {
