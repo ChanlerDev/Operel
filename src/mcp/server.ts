@@ -231,7 +231,11 @@ function registerTools(
           },
         },
         async (args) => {
-          const appName = args.app ?? args.bundle_id ?? "";
+          const activationArgs = name === "activate_window" ? await resolveWindowActivationArgs(args) : args;
+          if ("error" in activationArgs) {
+            return formatStructuredResult({ error: activationArgs.error });
+          }
+          const appName = activationArgs.app ?? activationArgs.bundle_id ?? "";
           const decision = policy.evaluateApp(appName);
           if (decision.decision === "denied") {
             return formatStructuredResult({
@@ -251,7 +255,10 @@ function registerTools(
               },
             });
           }
-          return withOptionalSessionStep(sessionStore, args, name, () => activateApp(args));
+          return withOptionalSessionStep(sessionStore, args, name, async () => ({
+            ...(await activateApp(activationArgs)),
+            active_window_id: activationArgs.window_id ?? "",
+          }));
         },
       );
       continue;
@@ -550,6 +557,49 @@ function formatStructuredResult(structuredContent: Record<string, unknown>) {
       },
     ],
     structuredContent,
+  };
+}
+
+async function resolveWindowActivationArgs(args: {
+  app?: string;
+  bundle_id?: string;
+  window_id?: string;
+  window_title?: string;
+}): Promise<
+  | {
+      app?: string;
+      bundle_id?: string;
+      window_id?: string;
+      window_title?: string;
+    }
+  | {
+      error: {
+        code: "target_not_found";
+        message: string;
+        recoverable: true;
+      };
+    }
+> {
+  if (!args.window_id) {
+    return args;
+  }
+
+  const appState = await listApps();
+  const owner = appState.apps.find((app) => app.windows.some((window) => window.window_id === args.window_id));
+  if (!owner) {
+    return {
+      error: {
+        code: "target_not_found",
+        message: "Unknown window_id.",
+        recoverable: true,
+      },
+    };
+  }
+
+  return {
+    ...args,
+    app: owner.name,
+    bundle_id: owner.bundle_id,
   };
 }
 

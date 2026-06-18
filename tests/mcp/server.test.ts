@@ -16,7 +16,7 @@ async function connectTestClient(
   artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-mcp-artifacts-")) }),
   policy = new PolicyEngine({
     apps: {
-      allowed: ["loginwindow", "WindowManager", "辅助功能", "Control Center", "Finder", "Terminal", "iTerm2", "Code"],
+      allowed: ["loginwindow", "WindowManager", "辅助功能", "Control Center", "Finder", "访达", "Terminal", "iTerm2", "Code"],
       denied: [],
       prompt: [],
     },
@@ -232,6 +232,51 @@ describe("Computer Use MCP server", () => {
 
       expect(result.structuredContent).toMatchObject({
         active_app: expect.any(String),
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("activates a window by window_id", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const windows = await client.callTool({ name: "list_windows", arguments: {} });
+      const target = ((windows.structuredContent as { windows?: Array<{ window_id?: string }> }).windows ?? []).find(
+        (window) => window.window_id,
+      );
+      expect(target).toBeDefined();
+
+      const result = await client.callTool({
+        name: "activate_window",
+        arguments: { window_id: target?.window_id },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        active_app: expect.any(String),
+        active_window_id: target?.window_id,
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns a recoverable error for unknown window_id activation", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "activate_window",
+        arguments: { window_id: "win_missing" },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "target_not_found",
+          message: "Unknown window_id.",
+          recoverable: true,
+        },
       });
     } finally {
       await server.close();
