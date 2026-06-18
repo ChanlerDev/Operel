@@ -100,7 +100,7 @@ Before coding, implementers must read:
 - [x] Read active app/window tree.
 - [x] Normalize role, label, title, value, frame and enabled state.
 - [x] Apply depth/node limits.
-- [ ] Redact sensitive values.
+- [x] Redact sensitive values.
 - [x] Generate short-lived element ids.
 - [x] Commit: `feat: observe macos accessibility tree`
 

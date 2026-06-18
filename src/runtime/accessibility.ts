@@ -7,6 +7,7 @@ export type AccessibilityNode = {
   role: string;
   label: string;
   value: string;
+  redacted?: boolean;
   enabled: boolean;
   frame: { x: number; y: number; width: number; height: number };
   children: AccessibilityNode[];
@@ -28,10 +29,17 @@ export async function readAccessibilityTree(input: {
   const client = new RuntimeClient({ command: helperPath });
 
   try {
-    return normalizeTree(await client.request("ax.read_tree", input));
+    return redactAccessibilityTree(normalizeTree(await client.request("ax.read_tree", input)));
   } finally {
     await client.close();
   }
+}
+
+export function redactAccessibilityTree(tree: AccessibilityTree): AccessibilityTree {
+  return {
+    tree_id: tree.tree_id,
+    nodes: tree.nodes.map((node) => redactNode(node)),
+  };
 }
 
 export function flattenAccessibilityNodes(nodes: AccessibilityNode[]): AccessibilityNode[] {
@@ -48,11 +56,13 @@ function normalizeTree(result: unknown): AccessibilityTree {
 
 function normalizeNode(value: Record<string, unknown>): AccessibilityNode {
   const frame = isObject(value.frame) ? value.frame : {};
+  const redacted = typeof value.redacted === "boolean" ? value.redacted : undefined;
   return {
     runtime_handle: stringValue(value.runtime_handle),
     role: stringValue(value.role),
     label: stringValue(value.label),
     value: stringValue(value.value),
+    ...(redacted === undefined ? {} : { redacted }),
     enabled: Boolean(value.enabled),
     frame: {
       x: numberValue(frame.x),
@@ -62,6 +72,41 @@ function normalizeNode(value: Record<string, unknown>): AccessibilityNode {
     },
     children: Array.isArray(value.children) ? value.children.filter(isObject).map(normalizeNode) : [],
   };
+}
+
+function redactNode(node: AccessibilityNode, sensitiveContext = false): AccessibilityNode {
+  const roleSensitive = isSensitiveRole(node.role);
+  const labelSensitive = hasSensitiveHint(node.label);
+  const valueSensitive = hasSensitiveHint(node.value);
+  const nextSensitiveContext = sensitiveContext || roleSensitive || labelSensitive;
+  const redactedLabel = labelSensitive && looksLikeSecret(node.label) ? "[REDACTED]" : node.label;
+  const shouldRedactValue = node.value !== "" && (nextSensitiveContext || valueSensitive || looksLikeSecret(node.value));
+
+  return {
+    ...node,
+    label: redactedLabel,
+    value: shouldRedactValue ? "[REDACTED]" : node.value,
+    redacted: node.redacted || shouldRedactValue || redactedLabel !== node.label || undefined,
+    children: node.children.map((child) => redactNode(child, nextSensitiveContext)),
+  };
+}
+
+function isSensitiveRole(role: string): boolean {
+  return /secure|password/i.test(role);
+}
+
+function hasSensitiveHint(value: string): boolean {
+  return /password|passcode|credential|secret|token|api[_ -]?key|private[_ -]?key/i.test(value) || looksLikeSecret(value);
+}
+
+function looksLikeSecret(value: string): boolean {
+  return [
+    /sk-[a-z0-9_-]{8,}/i,
+    /sk-proj-[a-z0-9_-]{8,}/i,
+    /xox[baprs]-[a-z0-9-]{8,}/i,
+    /gh[pousr]_[a-z0-9_]{20,}/i,
+    /[a-z0-9+/]{32,}={0,2}/i,
+  ].some((pattern) => pattern.test(value));
 }
 
 function stringValue(value: unknown): string {
