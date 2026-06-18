@@ -460,4 +460,51 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("exports a session manifest", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "exportmcp",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Export from MCP" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "export_session",
+        arguments: { session_id: sessionId },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        session_id: sessionId,
+        uri: `operel://sessions/${sessionId}/export`,
+        export_path: expect.any(String),
+        manifest_path: expect.any(String),
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("waits through MCP", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "wait",
+        arguments: { seconds: 0 },
+      });
+
+      expect(result.structuredContent).toEqual({
+        waited_ms: 0,
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

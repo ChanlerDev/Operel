@@ -48,6 +48,7 @@ describe("SessionStore", () => {
       status: "completed",
     });
     expect(store.getSession(session.session_id)?.last_step_id).toBe("step_stepid");
+    expect(store.listSteps(session.session_id)).toEqual([step]);
   });
 
   it("closes active sessions with the requested reason", () => {

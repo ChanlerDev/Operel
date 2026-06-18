@@ -1,6 +1,8 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import type { Session, Step } from "./session.js";
 
 export type ArtifactKind = "screenshot" | "accessibility_tree" | "audit";
 
@@ -19,6 +21,18 @@ export type Artifact = {
   uri: string;
   path: string;
   mime_type: string;
+};
+
+export type SessionExportInput = {
+  session: Session;
+  steps: Step[];
+};
+
+export type SessionExport = {
+  session_id: string;
+  uri: string;
+  export_path: string;
+  manifest_path: string;
 };
 
 export type ArtifactStoreOptions = {
@@ -51,6 +65,30 @@ export class ArtifactStore {
       uri: `operel://sessions/${input.session_id}/artifacts/${artifactId}`,
       path,
       mime_type: input.mime_type || mimeTypeForExtension(basename(path)),
+    };
+  }
+
+  exportSession(input: SessionExportInput): SessionExport {
+    const exportPath = join(this.root, "sessions", input.session.session_id, "export");
+    const manifestPath = join(exportPath, "manifest.json");
+    mkdirSync(exportPath, { recursive: true });
+    writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          session: input.session,
+          steps: input.steps,
+        },
+        null,
+        2,
+      ),
+    );
+
+    return {
+      session_id: input.session.session_id,
+      uri: `operel://sessions/${input.session.session_id}/export`,
+      export_path: exportPath,
+      manifest_path: manifestPath,
     };
   }
 }

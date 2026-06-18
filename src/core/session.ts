@@ -86,6 +86,11 @@ export class SessionStore {
     return [...this.sessions.values()].map((session) => ({ ...session }));
   }
 
+  listSteps(sessionId: string): Step[] {
+    this.requireSession(sessionId);
+    return (this.steps.get(sessionId) ?? []).map((step) => ({ ...step }));
+  }
+
   recordStep(sessionId: string, input: RecordStepInput): Step {
     const session = this.requireActiveSession(sessionId);
     const timestamp = this.now().toISOString();

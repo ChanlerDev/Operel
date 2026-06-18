@@ -354,6 +354,59 @@ function registerTools(
       continue;
     }
 
+    if (name === "export_session") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            session_id: z.string(),
+          },
+        },
+        async (args) => {
+          const session = sessionStore.getSession(args.session_id);
+          if (!session) {
+            return formatStructuredResult({
+              error: {
+                code: "session_expired",
+                message: `Unknown session: ${args.session_id}`,
+                recoverable: false,
+              },
+            });
+          }
+          return formatStructuredResult(
+            artifactStore.exportSession({
+              session,
+              steps: sessionStore.listSteps(args.session_id),
+            }),
+          );
+        },
+      );
+      continue;
+    }
+
+    if (name === "wait") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            seconds: z.number().min(0).max(30).default(1),
+          },
+        },
+        async (args) => {
+          const waitedMs = Math.round((args.seconds ?? 1) * 1000);
+          if (waitedMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, waitedMs));
+          }
+          return formatStructuredResult({ waited_ms: waitedMs });
+        },
+      );
+      continue;
+    }
+
     server.registerTool(
       name,
       {
