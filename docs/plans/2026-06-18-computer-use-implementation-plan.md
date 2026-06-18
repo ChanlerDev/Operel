@@ -136,7 +136,7 @@ Before coding, implementers must read:
 
 - [x] Parse `~/.operel/computer-use/config.toml`.
 - [x] Implement allow/deny/prompt policy.
-- [ ] Add risk classifier for sensitive and destructive actions.
+- [x] Add risk classifier for sensitive and destructive actions.
 - [x] Return `approval_required` without executing risky actions.
 - [x] Commit: `feat: enforce computer use policy`
 

@@ -49,4 +49,46 @@ describe("PolicyEngine", () => {
       reason: "sensitive_text",
     });
   });
+
+  it("requires approval for destructive click targets", () => {
+    const policy = new PolicyEngine();
+
+    expect(policy.evaluateAction({ tool: "click", target: "Delete account" })).toEqual({
+      decision: "approval_required",
+      reason: "destructive_action",
+    });
+    expect(policy.evaluateAction({ tool: "click", selector: { role: "AXButton", label: "Remove file" } })).toEqual({
+      decision: "approval_required",
+      reason: "destructive_action",
+    });
+  });
+
+  it("requires approval for external or financial click targets", () => {
+    const policy = new PolicyEngine();
+
+    expect(policy.evaluateAction({ tool: "click", selector: { role: "AXButton", label: "Send email" } })).toEqual({
+      decision: "approval_required",
+      reason: "external_action",
+    });
+  });
+
+  it("allows ordinary click targets and coordinate-only clicks", () => {
+    const policy = new PolicyEngine();
+
+    expect(policy.evaluateAction({ tool: "click", target: "Save" })).toEqual({
+      decision: "allowed",
+    });
+    expect(policy.evaluateAction({ tool: "click" })).toEqual({
+      decision: "allowed",
+    });
+  });
+
+  it("requires approval for destructive key presses", () => {
+    const policy = new PolicyEngine();
+
+    expect(policy.evaluateAction({ tool: "press_key", key: "Delete" })).toEqual({
+      decision: "approval_required",
+      reason: "destructive_action",
+    });
+  });
 });

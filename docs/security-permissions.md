@@ -96,6 +96,14 @@ Agent instructions 必须包含：
 }
 ```
 
+MVP action risk classifier:
+
+- `type_text` 文本包含 password、token、API key 或 OpenAI/GitHub/Slack token 形态时返回 `approval_required`，reason 为 `sensitive_text`。
+- `click` 的 `target` 或 selector label/value 含 delete、remove、erase、discard、reset、format、terminate、revoke、disable、destroy 等破坏性词时返回 `destructive_action`。
+- `click` 的 `target` 或 selector label/value 含 send、share、post、publish、email、pay、buy、purchase、checkout、transfer、submit 等外发/支付词时返回 `external_action`。
+- `press_key` 的 Delete/Backspace 类按键默认视为 `destructive_action`。
+- 坐标点击没有可靠语义，MVP 不基于坐标猜测风险；调用方应优先使用 `element_id`、`target` 或 selector。
+
 ## 日志脱敏
 
 默认脱敏：

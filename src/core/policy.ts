@@ -15,6 +15,14 @@ export type PolicyDecision =
 export type ActionPolicyInput = {
   tool: string;
   text?: string;
+  target?: string;
+  selector?: {
+    role?: string;
+    label?: string;
+    value?: string;
+  };
+  key?: string;
+  modifiers?: string[];
 };
 
 export class PolicyEngine {
@@ -49,8 +57,26 @@ export class PolicyEngine {
       return { decision: "approval_required", reason: "sensitive_text" };
     }
 
+    if (input.tool === "click") {
+      const targetText = [input.target, input.selector?.label, input.selector?.value].filter(isNonEmptyString).join(" ");
+      if (looksDestructive(targetText)) {
+        return { decision: "approval_required", reason: "destructive_action" };
+      }
+      if (looksExternalOrFinancial(targetText)) {
+        return { decision: "approval_required", reason: "external_action" };
+      }
+    }
+
+    if (input.tool === "press_key" && isDestructiveShortcut(input.key, input.modifiers)) {
+      return { decision: "approval_required", reason: "destructive_action" };
+    }
+
     return { decision: "allowed" };
   }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function looksSensitive(text: string): boolean {
@@ -63,4 +89,28 @@ function looksSensitive(text: string): boolean {
   ];
 
   return patterns.some((pattern) => pattern.test(text));
+}
+
+function looksDestructive(text: string): boolean {
+  return /(^|\b)(delete|remove|erase|discard|reset|format|terminate|revoke|disable|destroy|drop|truncate)(\b|$)/i.test(
+    text,
+  );
+}
+
+function looksExternalOrFinancial(text: string): boolean {
+  return /(^|\b)(send|share|post|publish|email|pay|buy|purchase|checkout|transfer|submit)(\b|$)/i.test(text);
+}
+
+function isDestructiveShortcut(key: string | undefined, modifiers: string[] | undefined): boolean {
+  const normalizedKey = key?.trim().toLocaleLowerCase();
+  const normalizedModifiers = new Set((modifiers ?? []).map((modifier) => modifier.trim().toLocaleLowerCase()));
+  if (!normalizedKey) {
+    return false;
+  }
+
+  return (
+    normalizedKey === "delete" ||
+    normalizedKey === "backspace" ||
+    (normalizedModifiers.has("cmd") && (normalizedKey === "delete" || normalizedKey === "backspace"))
+  );
 }

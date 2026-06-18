@@ -358,10 +358,15 @@ function registerTools(
             modifiers: z.array(z.string()).optional(),
           },
         },
-        async (args) =>
-          withOptionalSessionStep(sessionStore, args, name, () => pressKey(args), {
+        async (args) => {
+          const decision = policy.evaluateAction({ tool: "press_key", key: args.key, modifiers: args.modifiers });
+          if (decision.decision === "approval_required") {
+            return formatApprovalRequired(decision.reason);
+          }
+          return withOptionalSessionStep(sessionStore, args, name, () => pressKey(args), {
             postObserve: { artifactStore },
-          }),
+          });
+        },
       );
       continue;
     }
@@ -381,13 +386,7 @@ function registerTools(
         async (args) => {
           const decision = policy.evaluateAction({ tool: "type_text", text: args.text });
           if (args.sensitive || decision.decision === "approval_required") {
-            return formatStructuredResult({
-              error: {
-                code: "approval_required",
-                message: "Action requires approval before typing sensitive text.",
-                recoverable: true,
-              },
-            });
+            return formatApprovalRequired(decision.reason ?? "sensitive_text");
           }
           return withOptionalSessionStep(sessionStore, args, name, () =>
             typeText({ text: args.text, strategy: "paste" }),
@@ -449,6 +448,14 @@ function registerTools(
         },
         async (args) => {
           try {
+            const decision = policy.evaluateAction({
+              tool: "click",
+              target: args.target,
+              selector: args.selector,
+            });
+            if (decision.decision === "approval_required") {
+              return formatApprovalRequired(decision.reason);
+            }
             let clickInput: Record<string, unknown> = args;
             if (args.element_id) {
               if (!args.session_id) {
@@ -657,6 +664,17 @@ function formatStructuredResult(structuredContent: Record<string, unknown>) {
     ],
     structuredContent,
   };
+}
+
+function formatApprovalRequired(reason: string) {
+  return formatStructuredResult({
+    error: {
+      code: "approval_required",
+      reason,
+      message: `Action requires approval before continuing: ${reason}.`,
+      recoverable: true,
+    },
+  });
 }
 
 async function resolveWindowActivationArgs(args: {

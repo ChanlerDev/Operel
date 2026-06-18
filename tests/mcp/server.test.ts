@@ -508,7 +508,56 @@ describe("Computer Use MCP server", () => {
       expect(result.structuredContent).toEqual({
         error: {
           code: "approval_required",
-          message: "Action requires approval before typing sensitive text.",
+          reason: "sensitive_text",
+          message: "Action requires approval before continuing: sensitive_text.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requires approval for risky click targets before runtime execution", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "click",
+        arguments: {
+          target: "Delete account",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "approval_required",
+          reason: "destructive_action",
+          message: "Action requires approval before continuing: destructive_action.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requires approval for destructive key presses before runtime execution", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "press_key",
+        arguments: {
+          key: "Delete",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "approval_required",
+          reason: "destructive_action",
+          message: "Action requires approval before continuing: destructive_action.",
           recoverable: true,
         },
       });
