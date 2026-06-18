@@ -114,7 +114,19 @@ Input:
   "properties": {
     "session_id": { "type": "string" },
     "app": { "type": "string" },
+    "bundle_id": { "type": "string" },
+    "window_id": { "type": "string" },
     "include_screenshot": { "type": "boolean", "default": true },
+    "screenshot_scope": { "type": "string", "enum": ["display", "app", "window", "rect"], "default": "display" },
+    "rect": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" }
+      }
+    },
     "include_accessibility_tree": { "type": "boolean", "default": true },
     "max_tree_depth": { "type": "integer", "minimum": 1, "maximum": 20, "default": 8 }
   }

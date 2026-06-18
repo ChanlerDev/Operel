@@ -90,7 +90,7 @@ Before coding, implementers must read:
 ### Task 6: Screenshot capture
 
 - [x] Implement full display screenshot.
-- [ ] Add window/app screenshot if available.
+- [x] Add window/app screenshot if available.
 - [x] Return dimensions, scale and artifact bytes.
 - [x] Store screenshot artifacts from Node core.
 - [x] Commit: `feat: capture macos screenshots`

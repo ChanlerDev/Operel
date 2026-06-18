@@ -162,17 +162,37 @@ function registerTools(
           inputSchema: {
             session_id: z.string(),
             app: z.string().optional(),
+            bundle_id: z.string().optional(),
+            window_id: z.string().optional(),
             include_screenshot: z.boolean().optional(),
+            screenshot_scope: z.enum(["display", "app", "window", "rect"]).optional(),
+            rect: z
+              .object({
+                x: z.number(),
+                y: z.number(),
+                width: z.number(),
+                height: z.number(),
+              })
+              .optional(),
             include_accessibility_tree: z.boolean().optional(),
             max_tree_depth: z.number().optional(),
           },
         },
         async (args) => {
-          const screenshot = args.include_screenshot === false ? undefined : await captureScreen();
+          const screenshot =
+            args.include_screenshot === false
+              ? undefined
+              : await captureScreen({
+                  scope: args.screenshot_scope ?? "display",
+                  app: args.app,
+                  bundle_id: args.bundle_id,
+                  window_id: args.window_id,
+                  rect: args.rect,
+                });
           const accessibility =
             args.include_accessibility_tree === false
               ? undefined
-              : await readAccessibilityTree({ app: args.app, max_depth: args.max_tree_depth });
+              : await readAccessibilityTree({ app: args.app, bundle_id: args.bundle_id, max_depth: args.max_tree_depth });
           const artifact = screenshot
             ? artifactStore.saveFileArtifact({
                 session_id: args.session_id,

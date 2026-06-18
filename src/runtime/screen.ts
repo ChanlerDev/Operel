@@ -13,13 +13,23 @@ export type ScreenCaptureResult = {
   coordinate_space: string;
 };
 
-export async function captureScreen(): Promise<ScreenCaptureResult> {
+export type ScreenCaptureInput = {
+  scope?: "display" | "app" | "window" | "rect";
+  app?: string;
+  bundle_id?: string;
+  window_id?: string;
+  rect?: { x: number; y: number; width: number; height: number };
+};
+
+export async function captureScreen(input: ScreenCaptureInput = {}): Promise<ScreenCaptureResult> {
   const helperPath =
     process.env.OPEREL_RUNTIME_HELPER ?? join(process.cwd(), "macos/.build/debug/OperelRuntime");
   const client = new RuntimeClient({ command: helperPath, requestTimeoutMs: 10_000 });
 
   try {
-    return normalizeCapture(await client.request("screen.capture", { scope: "display", format: "png" }));
+    return normalizeCapture(
+      await client.request("screen.capture", { scope: input.scope ?? "display", format: "png", ...input }),
+    );
   } finally {
     await client.close();
   }

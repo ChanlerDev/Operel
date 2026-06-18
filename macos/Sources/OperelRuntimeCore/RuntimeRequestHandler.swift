@@ -167,8 +167,11 @@ private struct RuntimeRequest: Decodable {
 }
 
 private struct RuntimeParams: Decodable {
+    let scope: String?
     let app: String?
     let bundle_id: String?
+    let window_id: String?
+    let rect: CaptureRect?
     let max_depth: Int?
     let max_nodes: Int?
     let key: String?
@@ -189,6 +192,13 @@ private struct RuntimeParams: Decodable {
     let delta_y: Double?
     let button: String?
     let click_count: Int?
+}
+
+private struct CaptureRect: Decodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
 }
 
 private struct RuntimeResponse: Encodable {
@@ -258,7 +268,7 @@ private func screenCaptureResponse(request: RuntimeRequest) throws -> RuntimeRes
         )
     }
 
-    guard let image = CGDisplayCreateImage(displayID) else {
+    guard let displayImage = CGDisplayCreateImage(displayID) else {
         return RuntimeResponse(
             jsonrpc: "2.0",
             id: request.id,
@@ -268,6 +278,34 @@ private func screenCaptureResponse(request: RuntimeRequest) throws -> RuntimeRes
                 message: "Unable to capture the main display."
             )
         )
+    }
+
+    let displayBounds = CGDisplayBounds(displayID)
+    let pixelWidth = CGDisplayPixelsWide(displayID)
+    let scale = displayBounds.width > 0 ? Double(pixelWidth) / displayBounds.width : 1
+    let captureRegion = requestedCaptureRegion(request: request, displayBounds: displayBounds)
+
+    if let error = captureRegion.error {
+        return RuntimeResponse(jsonrpc: "2.0", id: request.id, result: nil, error: error)
+    }
+
+    let logicalBounds = captureRegion.rect ?? displayBounds
+    let image: CGImage
+    if let cropRect = pixelCropRect(for: logicalBounds, displayBounds: displayBounds, scale: scale) {
+        guard let cropped = displayImage.cropping(to: cropRect) else {
+            return RuntimeResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: nil,
+                error: RuntimeError(
+                    code: "action_failed",
+                    message: "Unable to crop screenshot."
+                )
+            )
+        }
+        image = cropped
+    } else {
+        image = displayImage
     }
 
     let url = FileManager.default.temporaryDirectory
@@ -291,26 +329,163 @@ private func screenCaptureResponse(request: RuntimeRequest) throws -> RuntimeRes
         )
     }
 
-    let bounds = CGDisplayBounds(displayID)
-    let pixelWidth = CGDisplayPixelsWide(displayID)
-    let pixelHeight = CGDisplayPixelsHigh(displayID)
-    let scale = bounds.width > 0 ? Double(pixelWidth) / bounds.width : 1
-
     return RuntimeResponse(
         jsonrpc: "2.0",
         id: request.id,
         result: .object([
             "tmp_path": .string(url.path),
-            "width": .int(Int(bounds.width)),
-            "height": .int(Int(bounds.height)),
-            "pixel_width": .int(pixelWidth),
-            "pixel_height": .int(pixelHeight),
+            "width": .int(Int(logicalBounds.width)),
+            "height": .int(Int(logicalBounds.height)),
+            "pixel_width": .int(image.width),
+            "pixel_height": .int(image.height),
             "scale": .double(scale),
             "display_id": .int(Int(displayID)),
             "coordinate_space": .string("logical_points")
         ]),
         error: nil
     )
+}
+
+private func requestedCaptureRegion(
+    request: RuntimeRequest,
+    displayBounds: CGRect
+) -> (rect: CGRect?, error: RuntimeError?) {
+    let scope = request.params?.scope ?? "display"
+
+    switch scope {
+    case "display":
+        return (nil, nil)
+    case "rect":
+        guard let rect = request.params?.rect else {
+            return (nil, RuntimeError(code: "target_not_found", message: "screen.capture scope=rect requires rect."))
+        }
+        return clampedCaptureRect(
+            CGRect(x: CGFloat(rect.x), y: CGFloat(rect.y), width: CGFloat(rect.width), height: CGFloat(rect.height)),
+            displayBounds: displayBounds
+        )
+    case "window":
+        guard let windowID = request.params?.window_id else {
+            return (nil, RuntimeError(code: "target_not_found", message: "screen.capture scope=window requires window_id."))
+        }
+        guard let rect = findWindowCaptureRect(windowID: windowID, app: request.params?.app, bundleID: request.params?.bundle_id) else {
+            return (nil, RuntimeError(code: "target_not_found", message: "Window was not found for screenshot capture."))
+        }
+        return clampedCaptureRect(rect, displayBounds: displayBounds)
+    case "app":
+        guard request.params?.app != nil || request.params?.bundle_id != nil else {
+            return (nil, RuntimeError(code: "target_not_found", message: "screen.capture scope=app requires app or bundle_id."))
+        }
+        guard let rect = findAppCaptureRect(app: request.params?.app, bundleID: request.params?.bundle_id) else {
+            return (nil, RuntimeError(code: "target_not_found", message: "App window was not found for screenshot capture."))
+        }
+        return clampedCaptureRect(rect, displayBounds: displayBounds)
+    default:
+        return (nil, RuntimeError(code: "invalid_request", message: "Unsupported screen.capture scope: \(scope)."))
+    }
+}
+
+private func clampedCaptureRect(_ rect: CGRect, displayBounds: CGRect) -> (rect: CGRect?, error: RuntimeError?) {
+    guard rect.width > 0, rect.height > 0 else {
+        return (nil, RuntimeError(code: "target_not_found", message: "Screenshot capture rect is empty."))
+    }
+
+    let clamped = rect.intersection(displayBounds)
+    guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else {
+        return (nil, RuntimeError(code: "target_not_found", message: "Screenshot capture rect is outside the main display."))
+    }
+    return (clamped, nil)
+}
+
+private func pixelCropRect(for logicalRect: CGRect, displayBounds: CGRect, scale: Double) -> CGRect? {
+    guard logicalRect != displayBounds else {
+        return nil
+    }
+
+    let cgScale = CGFloat(scale)
+    return CGRect(
+        x: (logicalRect.minX - displayBounds.minX) * cgScale,
+        y: (logicalRect.minY - displayBounds.minY) * cgScale,
+        width: logicalRect.width * cgScale,
+        height: logicalRect.height * cgScale
+    ).integral
+}
+
+private func findWindowCaptureRect(windowID: String, app: String?, bundleID: String?) -> CGRect? {
+    guard let wantedWindowNumber = Int(windowID.replacingOccurrences(of: "win_", with: "")) else {
+        return nil
+    }
+    let allowedPIDs = matchingApplicationPIDs(app: app, bundleID: bundleID)
+    return visibleWindowSnapshots().first { window in
+        if window.windowNumber != wantedWindowNumber {
+            return false
+        }
+        if !allowedPIDs.isEmpty && !allowedPIDs.contains(window.pid) {
+            return false
+        }
+        return true
+    }?.bounds
+}
+
+private func findAppCaptureRect(app: String?, bundleID: String?) -> CGRect? {
+    let allowedPIDs = matchingApplicationPIDs(app: app, bundleID: bundleID)
+    guard !allowedPIDs.isEmpty else {
+        return nil
+    }
+
+    let windows = visibleWindowSnapshots().filter { allowedPIDs.contains($0.pid) }
+    guard let first = windows.first else {
+        return nil
+    }
+
+    return windows.dropFirst().reduce(first.bounds) { partial, window in
+        partial.union(window.bounds)
+    }
+}
+
+private func matchingApplicationPIDs(app: String?, bundleID: String?) -> Set<Int> {
+    let matches = NSWorkspace.shared.runningApplications.filter { runningApp in
+        let nameMatches = app.map { runningApp.localizedName == $0 } ?? false
+        let bundleMatches = bundleID.map { runningApp.bundleIdentifier == $0 } ?? false
+        return nameMatches || bundleMatches
+    }
+    return Set(matches.map { Int($0.processIdentifier) })
+}
+
+private struct WindowSnapshot {
+    let windowNumber: Int
+    let pid: Int
+    let bounds: CGRect
+}
+
+private func visibleWindowSnapshots() -> [WindowSnapshot] {
+    guard let rawWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return []
+    }
+
+    return rawWindows.compactMap { window in
+        let layer = window[kCGWindowLayer as String] as? Int ?? -1
+        guard layer == 0 else {
+            return nil
+        }
+        guard let pid = window[kCGWindowOwnerPID as String] as? Int else {
+            return nil
+        }
+
+        let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        let x = bounds["X"] as? Double ?? 0
+        let y = bounds["Y"] as? Double ?? 0
+        let width = bounds["Width"] as? Double ?? 0
+        let height = bounds["Height"] as? Double ?? 0
+        guard width > 0, height > 0 else {
+            return nil
+        }
+
+        return WindowSnapshot(
+            windowNumber: window[kCGWindowNumber as String] as? Int ?? 0,
+            pid: pid,
+            bounds: CGRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
+        )
+    }
 }
 
 private func accessibilityTreeResponse(request: RuntimeRequest) throws -> RuntimeResponse {
