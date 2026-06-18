@@ -69,6 +69,7 @@ export class SessionStore {
   private readonly steps = new Map<string, Step[]>();
   private readonly elements = new Map<string, Map<string, RegisteredElement>>();
   private readonly actionQueues = new Map<string, Promise<void>>();
+  private readonly abortControllers = new Map<string, AbortController>();
 
   constructor(options: SessionStoreOptions = {}) {
     this.now = options.now ?? (() => new Date());
@@ -90,6 +91,7 @@ export class SessionStore {
 
     this.sessions.set(session.session_id, session);
     this.steps.set(session.session_id, []);
+    this.abortControllers.set(session.session_id, new AbortController());
 
     return { ...session };
   }
@@ -125,14 +127,18 @@ export class SessionStore {
     return element ? cloneRegisteredElement(element) : undefined;
   }
 
-  async runExclusive<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+  async runExclusive<T>(sessionId: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
     this.requireActiveSession(sessionId);
     const previous = this.actionQueues.get(sessionId) ?? Promise.resolve();
     const run = previous
       .catch(() => undefined)
       .then(async () => {
         this.requireActiveSession(sessionId);
-        return operation();
+        const signal = this.abortControllers.get(sessionId)?.signal;
+        if (!signal || signal.aborted) {
+          throw new Error(`session is cancelled: ${sessionId}`);
+        }
+        return operation(signal);
       });
     const current = run.then(
       () => undefined,
@@ -148,6 +154,12 @@ export class SessionStore {
         this.actionQueues.delete(sessionId);
       }
     }
+  }
+
+  abortActiveOperations(sessionId: string): void {
+    this.requireActiveSession(sessionId);
+    this.abortControllers.get(sessionId)?.abort();
+    this.abortControllers.set(sessionId, new AbortController());
   }
 
   recordStep(sessionId: string, input: RecordStepInput): Step {
@@ -182,6 +194,9 @@ export class SessionStore {
     session.updated_at = timestamp;
     session.closed_at = timestamp;
     this.sessions.set(sessionId, session);
+    this.abortControllers.get(sessionId)?.abort();
+    this.abortControllers.delete(sessionId);
+    this.actionQueues.delete(sessionId);
     return { ...session };
   }
 

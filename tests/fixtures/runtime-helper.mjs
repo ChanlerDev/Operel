@@ -22,6 +22,21 @@ rl.on("line", (line) => {
     return;
   }
 
+  if (request.method === "runtime.sleep") {
+    setTimeout(() => {
+      process.stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            slept_ms: request.params?.ms ?? 0,
+          },
+        })}\n`,
+      );
+    }, request.params?.ms ?? 0);
+    return;
+  }
+
   process.stdout.write(
     `${JSON.stringify({
       jsonrpc: "2.0",

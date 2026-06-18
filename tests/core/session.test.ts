@@ -193,6 +193,40 @@ describe("SessionStore", () => {
     await expect(store.runExclusive(session.session_id, async () => "recovered")).resolves.toBe("recovered");
   });
 
+  it("aborts active session operations when cancellation is requested", async () => {
+    const store = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "abortid",
+    });
+    const session = store.startSession({ task: "Abort action" });
+    let observedSignal!: AbortSignal;
+
+    const operation = store.runExclusive(
+      session.session_id,
+      (signal) =>
+        new Promise<string>((resolve, reject) => {
+          observedSignal = signal;
+          const timeout = setTimeout(() => resolve("not aborted"), 1_000);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timeout);
+              reject(new Error("operation aborted"));
+            },
+            { once: true },
+          );
+        }),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observedSignal.aborted).toBe(false);
+
+    store.abortActiveOperations(session.session_id);
+
+    await expect(operation).rejects.toThrow("operation aborted");
+    expect(observedSignal.aborted).toBe(true);
+  });
+
   it("rejects steps for unknown or non-active sessions", () => {
     const store = new SessionStore({
       now: () => new Date("2026-06-18T00:00:00.000Z"),

@@ -714,4 +714,41 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("returns a stable timeout error for session actions", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "timeout",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Timeout wait" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "wait",
+        arguments: {
+          session_id: sessionId,
+          seconds: 0.05,
+          timeout_ms: 1,
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "action_timeout",
+          message: "action timed out after 1ms",
+          recoverable: true,
+        },
+        session_id: sessionId,
+      });
+      expect(sessionStore.listSteps(sessionId)).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
 });

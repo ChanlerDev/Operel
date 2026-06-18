@@ -41,4 +41,16 @@ describe("RuntimeClient", () => {
       "Unknown method: missing.method",
     );
   });
+
+  it("rejects requests that exceed the configured timeout", async () => {
+    client = new RuntimeClient({
+      command: process.execPath,
+      args: [fixtureHelper],
+      requestTimeoutMs: 1,
+    });
+
+    await expect(client.request("runtime.sleep", { ms: 50 })).rejects.toThrow(
+      "runtime request timed out: runtime.sleep",
+    );
+  });
 });

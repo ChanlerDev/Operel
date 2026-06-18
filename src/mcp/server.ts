@@ -126,6 +126,8 @@ function registerTools(
             });
           }
 
+          sessionStore.abortActiveOperations(args.session_id);
+
           let recovery: Record<string, unknown>;
           try {
             recovery = await releaseModifiers();
@@ -558,13 +560,19 @@ function registerTools(
           inputSchema: {
             session_id: z.string().optional(),
             seconds: z.number().min(0).max(30).default(1),
+            timeout_ms: z.number().min(1).max(30000).optional(),
           },
         },
         async (args) => {
-          return withOptionalSessionStep(sessionStore, args, name, async () => {
+          return withOptionalSessionStep(sessionStore, args, name, async (sessionId, signal) => {
             const waitedMs = Math.round((args.seconds ?? 1) * 1000);
+            const timeoutMs = args.timeout_ms;
+            if (timeoutMs !== undefined && timeoutMs < waitedMs) {
+              await delay(timeoutMs, signal);
+              throw new Error(`action timed out after ${timeoutMs}ms`);
+            }
             if (waitedMs > 0) {
-              await new Promise((resolve) => setTimeout(resolve, waitedMs));
+              await delay(waitedMs, signal);
             }
             return { waited_ms: waitedMs };
           });
@@ -691,14 +699,15 @@ async function withOptionalSessionStep(
   sessionStore: SessionStore,
   args: Record<string, unknown>,
   tool: string,
-  run: (sessionId: string) => Promise<Record<string, unknown>>,
+  run: (sessionId: string, signal: AbortSignal) => Promise<Record<string, unknown>>,
   options: {
     postObserve?: {
       artifactStore: ArtifactStore;
     };
   } = {},
 ) {
-  let sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
+  const providedSessionId = typeof args.session_id === "string" ? args.session_id : undefined;
+  let sessionId = providedSessionId;
   if (!sessionId) {
     sessionId = sessionStore.startSession({ task: `Ad hoc ${tool}` }).session_id;
   } else if (!sessionStore.getSession(sessionId)) {
@@ -711,18 +720,54 @@ async function withOptionalSessionStep(
     });
   }
 
-  return sessionStore.runExclusive(sessionId, async () => {
-    const result = await run(sessionId);
-    const postObservation = options.postObserve
-      ? await capturePostActionObservation(sessionId, options.postObserve.artifactStore)
-      : undefined;
-    const resultWithSession = { ...result, session_id: sessionId, post_observation: postObservation };
-    sessionStore.recordStep(sessionId, {
-      tool,
-      input: args,
-      result: resultWithSession,
+  try {
+    return await sessionStore.runExclusive(sessionId, async (signal) => {
+      const result = await run(sessionId, signal);
+      const postObservation = options.postObserve
+        ? await capturePostActionObservation(sessionId, options.postObserve.artifactStore)
+        : undefined;
+      const resultWithSession = { ...result, session_id: sessionId, post_observation: postObservation };
+      sessionStore.recordStep(sessionId, {
+        tool,
+        input: args,
+        result: resultWithSession,
+      });
+      return formatStructuredResult(resultWithSession);
     });
-    return formatStructuredResult(resultWithSession);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = /timed out/i.test(message)
+      ? "action_timeout"
+      : /cancelled|aborted/i.test(message)
+        ? "action_cancelled"
+        : "action_failed";
+    return formatStructuredResult({
+      error: {
+        code,
+        message,
+        recoverable: true,
+      },
+      ...(providedSessionId || code !== "action_failed" ? { session_id: sessionId } : {}),
+    });
+  }
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(new Error("session action cancelled"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("session action cancelled"));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 

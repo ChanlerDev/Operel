@@ -179,6 +179,25 @@ Input:
 
 请求中断正在运行或等待审批的 session。实现上必须尽力释放按下中的 modifier、恢复剪贴板，并写入 audit event。
 
+Input:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string" }
+  },
+  "required": ["session_id"]
+}
+```
+
+MVP contract:
+
+- 立即向 session 内正在执行的可中断动作发送 cancel signal。
+- 尽力调用 `recover` 等价路径释放 modifier。
+- 将 session 标记为 `cancelled`。
+- 已经提交给 macOS 且不可中断的底层系统调用仍依赖 runtime request timeout 返回。
+
 ### `click`
 
 点击目标。优先用 `element_id`，其次 `target` 文本或 role selector，最后才用坐标。
@@ -270,6 +289,7 @@ Input:
 
 - `seconds`
 - `until`: optional selector/text/app/window condition
+- `timeout_ms`: optional per-action timeout. 如果小于等待时长，返回 `action_timeout`，不记录 completed step。
 
 ### `open_app`
 
