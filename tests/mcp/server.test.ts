@@ -196,4 +196,27 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("activates a running app through open_app", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const apps = await client.callTool({ name: "list_apps", arguments: {} });
+      const target = ((apps.structuredContent as { apps?: Array<{ bundle_id?: string }> }).apps ?? []).find(
+        (app) => app.bundle_id,
+      );
+      expect(target).toBeDefined();
+
+      const result = await client.callTool({
+        name: "open_app",
+        arguments: { bundle_id: target?.bundle_id },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        active_app: expect.any(String),
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

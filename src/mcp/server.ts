@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
+import { activateApp } from "../runtime/activate.js";
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 
@@ -132,6 +133,24 @@ function registerTools(server: McpServer, sessionStore: SessionStore): void {
             );
           return formatStructuredResult({ windows });
         },
+      );
+      continue;
+    }
+
+    if (name === "open_app" || name === "activate_window") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            app: z.string().optional(),
+            bundle_id: z.string().optional(),
+            window_id: z.string().optional(),
+            window_title: z.string().optional(),
+          },
+        },
+        async (args) => formatStructuredResult(await activateApp(args)),
       );
       continue;
     }

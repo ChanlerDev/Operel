@@ -49,6 +49,8 @@ public struct RuntimeRequestHandler {
                 ]),
                 error: nil
             ))
+        case "app.activate":
+            return try encode(activateAppResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -86,6 +88,12 @@ private struct RuntimeRequest: Decodable {
     let jsonrpc: String
     let id: String
     let method: String
+    let params: RuntimeParams?
+}
+
+private struct RuntimeParams: Decodable {
+    let app: String?
+    let bundle_id: String?
 }
 
 private struct RuntimeResponse: Encodable {
@@ -149,6 +157,44 @@ private func listRunningApps() -> [JSONValue] {
                 "windows": .array([])
             ])
         }
+}
+
+private func activateAppResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    let requestedName = request.params?.app
+    let requestedBundleID = request.params?.bundle_id
+    let candidates = NSWorkspace.shared.runningApplications.filter { app in
+        if let requestedBundleID, app.bundleIdentifier == requestedBundleID {
+            return true
+        }
+        if let requestedName, app.localizedName == requestedName {
+            return true
+        }
+        return false
+    }
+
+    guard let app = candidates.first else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "target_not_found",
+                message: "App is not running or cannot be found."
+            )
+        )
+    }
+
+    app.activate(options: [.activateIgnoringOtherApps])
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "active_app": .string(app.localizedName ?? app.bundleIdentifier ?? "pid_\(app.processIdentifier)"),
+            "active_window_id": .string("")
+        ]),
+        error: nil
+    )
 }
 
 private struct DynamicCodingKey: CodingKey {
