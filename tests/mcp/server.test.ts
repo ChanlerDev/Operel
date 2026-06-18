@@ -7,15 +7,23 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 
 import { ArtifactStore } from "../../src/core/artifacts.js";
+import { PolicyEngine } from "../../src/core/policy.js";
 import { SessionStore } from "../../src/core/session.js";
 import { createComputerUseServer } from "../../src/mcp/server.js";
 
 async function connectTestClient(
   sessionStore = new SessionStore(),
   artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-mcp-artifacts-")) }),
+  policy = new PolicyEngine({
+    apps: {
+      allowed: ["loginwindow", "WindowManager", "辅助功能", "Control Center", "Finder", "Terminal", "iTerm2", "Code"],
+      denied: [],
+      prompt: [],
+    },
+  }),
 ) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createComputerUseServer({ sessionStore, artifactStore });
+  const server = createComputerUseServer({ sessionStore, artifactStore, policy });
   const client = new Client(
     { name: "operel-test-client", version: "0.1.0" },
     { capabilities: {} },
@@ -210,18 +218,46 @@ describe("Computer Use MCP server", () => {
 
     try {
       const apps = await client.callTool({ name: "list_apps", arguments: {} });
-      const target = ((apps.structuredContent as { apps?: Array<{ bundle_id?: string }> }).apps ?? []).find(
-        (app) => app.bundle_id,
+      const target = ((apps.structuredContent as { apps?: Array<{ name?: string }> }).apps ?? []).find(
+        (app) => app.name,
       );
       expect(target).toBeDefined();
 
       const result = await client.callTool({
         name: "open_app",
-        arguments: { bundle_id: target?.bundle_id },
+        arguments: { app: target?.name },
       });
 
       expect(result.structuredContent).toMatchObject({
         active_app: expect.any(String),
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("blocks denied apps before activation", async () => {
+    const policy = new PolicyEngine({
+      apps: {
+        allowed: [],
+        denied: ["System Settings"],
+        prompt: [],
+      },
+    });
+    const { client, server } = await connectTestClient(new SessionStore(), undefined, policy);
+
+    try {
+      const result = await client.callTool({
+        name: "open_app",
+        arguments: { app: "System Settings" },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "app_denied",
+          message: "App is denied by policy.",
+          recoverable: false,
+        },
       });
     } finally {
       await server.close();

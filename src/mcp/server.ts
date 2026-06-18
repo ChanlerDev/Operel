@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
 import { ArtifactStore } from "../core/artifacts.js";
+import { PolicyEngine } from "../core/policy.js";
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
 import { activateApp } from "../runtime/activate.js";
 import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/accessibility.js";
@@ -31,17 +32,19 @@ const mvpToolNames = [
 export type ComputerUseServerOptions = {
   sessionStore?: SessionStore;
   artifactStore?: ArtifactStore;
+  policy?: PolicyEngine;
 };
 
 export function createComputerUseServer(options: ComputerUseServerOptions = {}): McpServer {
   const sessionStore = options.sessionStore ?? new SessionStore();
   const artifactStore = options.artifactStore ?? new ArtifactStore();
+  const policy = options.policy ?? new PolicyEngine();
   const server = new McpServer({
     name: "operel-computer-use",
     version: "0.1.0",
   });
 
-  registerTools(server, sessionStore, artifactStore);
+  registerTools(server, sessionStore, artifactStore, policy);
   registerResources(server, sessionStore);
   registerPrompts(server);
 
@@ -52,6 +55,7 @@ function registerTools(
   server: McpServer,
   sessionStore: SessionStore,
   artifactStore: ArtifactStore,
+  policy: PolicyEngine,
 ): void {
   for (const name of mvpToolNames) {
     if (name === "start_session") {
@@ -218,7 +222,29 @@ function registerTools(
             window_title: z.string().optional(),
           },
         },
-        async (args) => formatStructuredResult(await activateApp(args)),
+        async (args) => {
+          const appName = args.app ?? args.bundle_id ?? "";
+          const decision = policy.evaluateApp(appName);
+          if (decision.decision === "denied") {
+            return formatStructuredResult({
+              error: {
+                code: decision.reason,
+                message: "App is denied by policy.",
+                recoverable: false,
+              },
+            });
+          }
+          if (decision.decision === "prompt_required") {
+            return formatStructuredResult({
+              error: {
+                code: "approval_required",
+                message: "App requires approval before activation.",
+                recoverable: true,
+              },
+            });
+          }
+          return formatStructuredResult(await activateApp(args));
+        },
       );
       continue;
     }
