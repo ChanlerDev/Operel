@@ -33,6 +33,7 @@ export type SessionExport = {
   uri: string;
   export_path: string;
   manifest_path: string;
+  audit_path: string;
 };
 
 export type ArtifactStoreOptions = {
@@ -71,17 +72,27 @@ export class ArtifactStore {
   exportSession(input: SessionExportInput): SessionExport {
     const exportPath = join(this.root, "sessions", input.session.session_id, "export");
     const manifestPath = join(exportPath, "manifest.json");
+    const auditPath = join(exportPath, "audit.jsonl");
+    const safeSession = redactForExport(input.session) as Session;
+    const safeSteps = redactForExport(input.steps) as Step[];
     mkdirSync(exportPath, { recursive: true });
     writeFileSync(
       manifestPath,
       JSON.stringify(
         {
-          session: input.session,
-          steps: input.steps,
+          session: safeSession,
+          steps: safeSteps,
         },
         null,
         2,
       ),
+    );
+    writeFileSync(
+      auditPath,
+      [
+        JSON.stringify({ type: "session", session: safeSession }),
+        ...safeSteps.map((step) => JSON.stringify({ type: "step", step })),
+      ].join("\n") + "\n",
     );
 
     return {
@@ -89,8 +100,48 @@ export class ArtifactStore {
       uri: `operel://sessions/${input.session.session_id}/export`,
       export_path: exportPath,
       manifest_path: manifestPath,
+      audit_path: auditPath,
     };
   }
+}
+
+function redactForExport(value: unknown, sensitiveContext = false): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactForExport(item, sensitiveContext));
+  }
+
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    const nextSensitiveContext = sensitiveContext || object.sensitive === true;
+    return Object.fromEntries(
+      Object.entries(object).map(([key, child]) => [
+        key,
+        shouldRedactKey(key) || (nextSensitiveContext && key === "text")
+          ? "[REDACTED]"
+          : redactForExport(child, nextSensitiveContext),
+      ]),
+    );
+  }
+
+  if (typeof value === "string" && looksSensitive(value)) {
+    return "[REDACTED]";
+  }
+
+  return value;
+}
+
+function shouldRedactKey(key: string): boolean {
+  return /^(password|token|api[_-]?key|secret|clipboard)$/i.test(key);
+}
+
+function looksSensitive(text: string): boolean {
+  return [
+    /sk-[a-z0-9_-]{8,}/i,
+    /sk-proj-[a-z0-9_-]{8,}/i,
+    /api[_-]?key/i,
+    /password/i,
+    /token/i,
+  ].some((pattern) => pattern.test(text));
 }
 
 function mimeTypeForExtension(path: string): string {

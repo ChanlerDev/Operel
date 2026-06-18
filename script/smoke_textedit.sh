@@ -83,6 +83,7 @@ console.log(JSON.stringify({
   session_id: session.session_id,
   export_uri: exported.uri,
   manifest_path: exported.manifest_path,
+  audit_path: exported.audit_path,
 }, null, 2));
 
 await server.close();
