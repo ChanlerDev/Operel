@@ -54,6 +54,61 @@ describe("resolveClickTarget", () => {
     });
   });
 
+  it("resolves a unique role selector to the element center", () => {
+    const result = resolveClickTarget(
+      { selector: { role: "AXButton", label: "save" } },
+      [
+        node({ role: "AXTextField", label: "Save", frame: { x: 0, y: 0, width: 10, height: 10 } }),
+        node({ role: "AXButton", label: "Save", frame: { x: 100, y: 80, width: 30, height: 20 } }),
+      ],
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      click: {
+        x: 115,
+        y: 90,
+      },
+    });
+  });
+
+  it("combines selector and text target filters", () => {
+    const result = resolveClickTarget(
+      { selector: { role: "AXButton" }, target: "Save" },
+      [
+        node({ role: "AXButton", label: "Cancel", frame: { x: 0, y: 0, width: 10, height: 10 } }),
+        node({ role: "AXButton", label: "Save", frame: { x: 20, y: 20, width: 40, height: 20 } }),
+      ],
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      click: {
+        x: 40,
+        y: 30,
+      },
+    });
+  });
+
+  it("rejects ambiguous selector matches", () => {
+    const result = resolveClickTarget(
+      { selector: { role: "AXButton" } },
+      [
+        node({ role: "AXButton", label: "Save", frame: { x: 0, y: 0, width: 10, height: 10 } }),
+        node({ role: "AXButton", label: "Cancel", frame: { x: 20, y: 0, width: 10, height: 10 } }),
+      ],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "ambiguous_target",
+        message: "Target matched multiple accessibility elements.",
+        recoverable: true,
+      },
+    });
+  });
+
   it("rejects missing or non-clickable targets", () => {
     expect(resolveClickTarget({ target: "Save" }, [])).toEqual({
       ok: false,

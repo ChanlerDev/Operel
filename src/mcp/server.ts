@@ -432,6 +432,13 @@ function registerTools(
             session_id: z.string().optional(),
             element_id: z.string().optional(),
             target: z.string().optional(),
+            selector: z
+              .object({
+                role: z.string().optional(),
+                label: z.string().optional(),
+                value: z.string().optional(),
+              })
+              .optional(),
             app: z.string().optional(),
             bundle_id: z.string().optional(),
             x: z.number().optional(),
@@ -476,10 +483,10 @@ function registerTools(
                 ax_width: element.frame.width,
                 ax_height: element.frame.height,
               };
-            } else if (args.target && (args.x === undefined || args.y === undefined)) {
-              const accessibility = await readAccessibilityTree();
+            } else if ((args.target || args.selector) && (args.x === undefined || args.y === undefined)) {
+              const accessibility = await readAccessibilityTree({ app: args.app, bundle_id: args.bundle_id });
               const resolution = resolveClickTarget(
-                { target: args.target },
+                { target: args.target, selector: args.selector },
                 flattenAccessibilityNodes(accessibility.nodes),
               );
               if (!resolution.ok) {

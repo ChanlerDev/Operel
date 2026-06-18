@@ -212,6 +212,14 @@ Input:
     "app": { "type": "string" },
     "element_id": { "type": "string" },
     "target": { "type": "string" },
+    "selector": {
+      "type": "object",
+      "properties": {
+        "role": { "type": "string" },
+        "label": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
     "x": { "type": "number" },
     "y": { "type": "number" },
     "button": { "type": "string", "enum": ["left", "right"], "default": "left" },
@@ -224,6 +232,7 @@ Contract:
 
 - 如果 `element_id` 来自过期 observation，runtime 必须重新验证 frame 和 app。
 - 如果 selector 匹配多个元素，返回 `ambiguous_target`，不要随机点击。
+- `selector.role` 使用精确匹配；`selector.label` / `selector.value` 支持包含匹配；多个 selector 字段按 AND 组合。
 - 坐标点击必须记录当前 screenshot artifact。
 
 ### `type_text`

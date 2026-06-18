@@ -124,7 +124,7 @@ Before coding, implementers must read:
 
 ### Task 10: Target resolution
 
-- [ ] Resolve element id, selector, text target and coordinates.
+- [x] Resolve element id, selector, text target and coordinates.
 - [x] Return ambiguity with candidates.
 - [x] Detect stale elements.
 - [x] Add fixture tests for common ambiguity cases.
