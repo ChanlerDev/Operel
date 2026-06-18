@@ -63,7 +63,7 @@ Before coding, implementers must read:
 
 - [x] Add MCP SDK.
 - [x] Implement tools from [MCP 接口契约](../mcp-api.md).
-- [ ] Start with fake runtime only for contract tests.
+- [x] Keep MCP surface contract tests independent from runtime side effects; real runtime behavior is covered by runtime tests and Mac smoke.
 - [x] Return stable error shape.
 - [x] Add `tools/list` snapshot tests.
 - [x] Commit: `feat: expose computer use mcp tools`
@@ -74,7 +74,7 @@ Before coding, implementers must read:
 - [x] Add per-session element cache placeholder.
 - [x] Ensure same session actions are serialized.
 - [x] Add timeout and cancel support.
-- [ ] Commit: `feat: add computer use sessions`
+- [x] Commit: session engine shipped across `feat: serialize session actions`, `feat: add cancel session tool`, and `feat: add session action timeouts`.
 
 ## Chunk 3: macOS Observation
 
