@@ -486,7 +486,9 @@ describe("Computer Use MCP server", () => {
   });
 
   it("types non-sensitive text through MCP", async () => {
-    const { client, server } = await connectTestClient();
+    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-type-artifacts-"));
+    const artifactStore = new ArtifactStore({ root: artifactRoot });
+    const { client, server } = await connectTestClient(undefined, artifactStore);
 
     try {
       const result = await client.callTool({
@@ -500,7 +502,18 @@ describe("Computer Use MCP server", () => {
         strategy_used: "paste",
         clipboard_restored: true,
         session_id: expect.stringMatching(/^sess_/),
+        post_observation: {
+          screen: {
+            screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_.*\/artifacts\/artifact_/),
+          },
+        },
       });
+      const screenshotUri = (result.structuredContent as {
+        post_observation: { screen: { screenshot_uri: string } };
+      }).post_observation.screen.screenshot_uri;
+      const artifactId = screenshotUri.split("/").at(-1);
+      expect(artifactId).toBeDefined();
+      expect(existsSync(join(artifactRoot, "sessions", (result.structuredContent as { session_id: string }).session_id, "artifacts", `${artifactId}.png`))).toBe(true);
     } finally {
       await server.close();
     }

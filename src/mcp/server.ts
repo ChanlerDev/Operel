@@ -272,7 +272,10 @@ function registerTools(
           description: descriptionForTool(name),
           inputSchema: z.object({}).passthrough(),
         },
-        async (args) => withOptionalSessionStep(sessionStore, args, name, () => releaseModifiers()),
+        async (args) =>
+          withOptionalSessionStep(sessionStore, args, name, () => releaseModifiers(), {
+            postObserve: { artifactStore },
+          }),
       );
       continue;
     }
@@ -289,7 +292,10 @@ function registerTools(
             modifiers: z.array(z.string()).optional(),
           },
         },
-        async (args) => withOptionalSessionStep(sessionStore, args, name, () => pressKey(args)),
+        async (args) =>
+          withOptionalSessionStep(sessionStore, args, name, () => pressKey(args), {
+            postObserve: { artifactStore },
+          }),
       );
       continue;
     }
@@ -319,6 +325,9 @@ function registerTools(
           }
           return withOptionalSessionStep(sessionStore, args, name, () =>
             typeText({ text: args.text, strategy: "paste" }),
+            {
+              postObserve: { artifactStore },
+            },
           );
         },
       );
@@ -339,7 +348,10 @@ function registerTools(
             delta_y: z.number().optional(),
           },
         },
-        async (args) => withOptionalSessionStep(sessionStore, args, name, () => scroll(args)),
+        async (args) =>
+          withOptionalSessionStep(sessionStore, args, name, () => scroll(args), {
+            postObserve: { artifactStore },
+          }),
       );
       continue;
     }
@@ -414,6 +426,8 @@ function registerTools(
                 screenshot_path: artifact.path,
                 coordinate_space: screenshot.coordinate_space,
               };
+            }, {
+              postObserve: { artifactStore },
             });
           } catch (error) {
             return formatStructuredResult({
@@ -604,6 +618,11 @@ async function withOptionalSessionStep(
   args: Record<string, unknown>,
   tool: string,
   run: (sessionId: string) => Promise<Record<string, unknown>>,
+  options: {
+    postObserve?: {
+      artifactStore: ArtifactStore;
+    };
+  } = {},
 ) {
   let sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
   if (!sessionId) {
@@ -619,13 +638,40 @@ async function withOptionalSessionStep(
   }
 
   const result = await run(sessionId);
-  const resultWithSession = { ...result, session_id: sessionId };
+  const postObservation = options.postObserve
+    ? await capturePostActionObservation(sessionId, options.postObserve.artifactStore)
+    : undefined;
+  const resultWithSession = { ...result, session_id: sessionId, post_observation: postObservation };
   sessionStore.recordStep(sessionId, {
     tool,
     input: args,
     result: resultWithSession,
   });
   return formatStructuredResult(resultWithSession);
+}
+
+async function capturePostActionObservation(sessionId: string, artifactStore: ArtifactStore) {
+  const screenshot = await captureScreen();
+  const artifact = artifactStore.saveFileArtifact({
+    session_id: sessionId,
+    kind: "screenshot",
+    source_path: screenshot.tmp_path,
+    extension: "png",
+    mime_type: "image/png",
+  });
+
+  return {
+    screen: {
+      width: screenshot.width,
+      height: screenshot.height,
+      scale: screenshot.scale,
+      pixel_width: screenshot.pixel_width,
+      pixel_height: screenshot.pixel_height,
+      display_id: screenshot.display_id,
+      coordinate_space: screenshot.coordinate_space,
+      screenshot_uri: artifact.uri,
+    },
+  };
 }
 
 function registerPrompts(server: McpServer): void {
