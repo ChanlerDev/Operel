@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
+import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 
 const mvpToolNames = [
@@ -88,6 +89,49 @@ function registerTools(server: McpServer, sessionStore: SessionStore): void {
           inputSchema: z.object({}).passthrough(),
         },
         async () => formatStructuredResult(await checkPermissions()),
+      );
+      continue;
+    }
+
+    if (name === "list_apps") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: z.object({}).passthrough(),
+        },
+        async () => formatStructuredResult(await listApps()),
+      );
+      continue;
+    }
+
+    if (name === "list_windows") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            app: z.string().optional(),
+            include_minimized: z.boolean().optional(),
+          },
+        },
+        async (args) => {
+          const appState = await listApps();
+          const windows = appState.apps
+            .filter((app) => !args.app || app.name === args.app || app.bundle_id === args.app)
+            .flatMap((app) =>
+              app.windows.map((window) => ({
+                ...window,
+                app_id: app.app_id,
+                app_name: app.name,
+                is_active: app.is_active,
+                is_minimized: false,
+              })),
+            );
+          return formatStructuredResult({ windows });
+        },
       );
       continue;
     }

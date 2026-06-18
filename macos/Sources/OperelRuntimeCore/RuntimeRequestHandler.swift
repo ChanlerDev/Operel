@@ -1,5 +1,6 @@
 import Foundation
 import ApplicationServices
+import AppKit
 import CoreGraphics
 
 public struct RuntimeRequestHandler {
@@ -36,6 +37,15 @@ public struct RuntimeRequestHandler {
                     "accessibility": .string(checkAccessibilityPermission()),
                     "automation": .string("unknown"),
                     "input_monitoring": .string("not_requested")
+                ]),
+                error: nil
+            ))
+        case "apps.list":
+            return try encode(RuntimeResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object([
+                    "apps": .array(listRunningApps())
                 ]),
                 error: nil
             ))
@@ -97,6 +107,8 @@ private enum RuntimeProtocolError: Error {
 private enum JSONValue: Encodable {
     case string(String)
     case int(Int)
+    case bool(Bool)
+    case array([JSONValue])
     case object([String: JSONValue])
 
     func encode(to encoder: Encoder) throws {
@@ -107,6 +119,14 @@ private enum JSONValue: Encodable {
         case let .int(value):
             var container = encoder.singleValueContainer()
             try container.encode(value)
+        case let .bool(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .array(value):
+            var container = encoder.unkeyedContainer()
+            for item in value {
+                try container.encode(item)
+            }
         case let .object(value):
             var container = encoder.container(keyedBy: DynamicCodingKey.self)
             for (key, item) in value {
@@ -114,6 +134,21 @@ private enum JSONValue: Encodable {
             }
         }
     }
+}
+
+private func listRunningApps() -> [JSONValue] {
+    NSWorkspace.shared.runningApplications
+        .filter { !$0.isTerminated }
+        .map { app in
+            .object([
+                "app_id": .string("pid_\(app.processIdentifier)"),
+                "name": .string(app.localizedName ?? app.bundleIdentifier ?? "pid_\(app.processIdentifier)"),
+                "bundle_id": .string(app.bundleIdentifier ?? ""),
+                "pid": .int(Int(app.processIdentifier)),
+                "is_active": .bool(app.isActive),
+                "windows": .array([])
+            ])
+        }
 }
 
 private struct DynamicCodingKey: CodingKey {

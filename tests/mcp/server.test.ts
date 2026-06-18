@@ -162,4 +162,38 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("returns running apps from list_apps", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "list_apps",
+        arguments: {},
+      });
+
+      const structured = result.structuredContent as { apps?: unknown[] };
+      expect(Array.isArray(structured.apps)).toBe(true);
+      expect(structured.apps?.length).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns windows grouped from app list in list_windows", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "list_windows",
+        arguments: {},
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        windows: expect.any(Array),
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });
