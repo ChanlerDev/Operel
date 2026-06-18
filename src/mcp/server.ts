@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
+import { checkPermissions } from "../runtime/permissions.js";
 
 const mvpToolNames = [
   "start_session",
@@ -74,6 +75,19 @@ function registerTools(server: McpServer, sessionStore: SessionStore): void {
           formatStructuredResult(
             sessionStore.closeSession(args.session_id, args.reason as CloseSessionReason),
           ),
+      );
+      continue;
+    }
+
+    if (name === "permission_check") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: z.object({}).passthrough(),
+        },
+        async () => formatStructuredResult(await checkPermissions()),
       );
       continue;
     }

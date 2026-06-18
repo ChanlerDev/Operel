@@ -1,4 +1,6 @@
 import Foundation
+import ApplicationServices
+import CoreGraphics
 
 public struct RuntimeRequestHandler {
     private let version: String
@@ -25,6 +27,18 @@ public struct RuntimeRequestHandler {
                 ]),
                 error: nil
             ))
+        case "permissions.check":
+            return try encode(RuntimeResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object([
+                    "screen_recording": .string(checkScreenRecordingPermission()),
+                    "accessibility": .string(checkAccessibilityPermission()),
+                    "automation": .string("unknown"),
+                    "input_monitoring": .string("not_requested")
+                ]),
+                error: nil
+            ))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -45,6 +59,17 @@ public struct RuntimeRequestHandler {
         }
         return line
     }
+}
+
+private func checkScreenRecordingPermission() -> String {
+    if #available(macOS 10.15, *) {
+        return CGPreflightScreenCaptureAccess() ? "granted" : "missing"
+    }
+    return "unknown"
+}
+
+private func checkAccessibilityPermission() -> String {
+    AXIsProcessTrusted() ? "granted" : "missing"
 }
 
 private struct RuntimeRequest: Decodable {

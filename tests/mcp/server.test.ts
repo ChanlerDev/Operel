@@ -142,4 +142,24 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("returns runtime permission diagnostics from permission_check", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "permission_check",
+        arguments: {},
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        screen_recording: expect.stringMatching(/^(granted|missing|unknown)$/),
+        accessibility: expect.stringMatching(/^(granted|missing|unknown)$/),
+        helper_status: expect.stringMatching(/^(ok|failed)$/),
+        next_steps: expect.any(Array),
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

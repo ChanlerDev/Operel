@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { parseCliArgs } from "./args.js";
 import { createComputerUseServer } from "../mcp/server.js";
 import { RuntimeClient } from "../runtime/client.js";
+import { checkPermissions } from "../runtime/permissions.js";
 
 export type DoctorResult = {
   screen_recording: string;
@@ -97,7 +98,7 @@ function formatDoctor(result: DoctorResult): string {
 }
 
 async function defaultDoctor(): Promise<DoctorResult> {
-  return defaultDoctorResult;
+  return checkPermissions();
 }
 
 async function defaultCall(tool: string, args: unknown): Promise<unknown> {
