@@ -56,6 +56,10 @@ public struct RuntimeRequestHandler {
             return try encode(screenCaptureResponse(request: request))
         case "ax.read_tree":
             return try encode(accessibilityTreeResponse(request: request))
+        case "input.release_modifiers":
+            return try encode(releaseModifiersResponse(request: request))
+        case "input.press_key":
+            return try encode(pressKeyResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -101,6 +105,8 @@ private struct RuntimeParams: Decodable {
     let bundle_id: String?
     let max_depth: Int?
     let max_nodes: Int?
+    let key: String?
+    let modifiers: [String]?
 }
 
 private struct RuntimeResponse: Encodable {
@@ -337,6 +343,111 @@ private func readAXFrame(element: AXUIElement) -> (x: Int, y: Int, width: Int, h
 
 private func firstNonEmpty(_ values: [String]) -> String {
     values.first { !$0.isEmpty } ?? ""
+}
+
+private func releaseModifiersResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    let modifiers: [(String, CGKeyCode)] = [
+        ("cmd", 0x37),
+        ("shift", 0x38),
+        ("option", 0x3A),
+        ("control", 0x3B)
+    ]
+
+    for (_, keyCode) in modifiers {
+        postKey(keyCode: keyCode, down: false, flags: [])
+    }
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "released": .array(modifiers.map { .string($0.0) })
+        ]),
+        error: nil
+    )
+}
+
+private func pressKeyResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    guard let key = request.params?.key, let keyCode = keyCodeFor(key: key) else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "unsupported_operation",
+                message: "Unsupported key."
+            )
+        )
+    }
+
+    let flags = eventFlags(for: request.params?.modifiers ?? [])
+    postKey(keyCode: keyCode, down: true, flags: flags)
+    postKey(keyCode: keyCode, down: false, flags: flags)
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "performed": .bool(true)
+        ]),
+        error: nil
+    )
+}
+
+private func postKey(keyCode: CGKeyCode, down: Bool, flags: CGEventFlags) {
+    guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else {
+        return
+    }
+    event.flags = flags
+    event.post(tap: .cghidEventTap)
+}
+
+private func eventFlags(for modifiers: [String]) -> CGEventFlags {
+    var flags = CGEventFlags()
+    for modifier in modifiers {
+        switch modifier.lowercased() {
+        case "cmd", "command":
+            flags.insert(.maskCommand)
+        case "shift":
+            flags.insert(.maskShift)
+        case "option", "alt":
+            flags.insert(.maskAlternate)
+        case "control", "ctrl":
+            flags.insert(.maskControl)
+        default:
+            continue
+        }
+    }
+    return flags
+}
+
+private func keyCodeFor(key: String) -> CGKeyCode? {
+    switch key.lowercased() {
+    case "return", "enter":
+        return 0x24
+    case "tab":
+        return 0x30
+    case "space":
+        return 0x31
+    case "delete", "backspace":
+        return 0x33
+    case "escape", "esc":
+        return 0x35
+    case "s":
+        return 0x01
+    case "a":
+        return 0x00
+    case "c":
+        return 0x08
+    case "v":
+        return 0x09
+    case "x":
+        return 0x07
+    case "z":
+        return 0x06
+    default:
+        return nil
+    }
 }
 
 private func listRunningApps() -> [JSONValue] {

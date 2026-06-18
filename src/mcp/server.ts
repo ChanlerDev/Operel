@@ -8,6 +8,7 @@ import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/acc
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 import { captureScreen } from "../runtime/screen.js";
+import { pressKey, releaseModifiers } from "../runtime/input.js";
 
 const mvpToolNames = [
   "start_session",
@@ -218,6 +219,35 @@ function registerTools(
           },
         },
         async (args) => formatStructuredResult(await activateApp(args)),
+      );
+      continue;
+    }
+
+    if (name === "recover") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: z.object({}).passthrough(),
+        },
+        async () => formatStructuredResult(await releaseModifiers()),
+      );
+      continue;
+    }
+
+    if (name === "press_key") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            key: z.string(),
+            modifiers: z.array(z.string()).optional(),
+          },
+        },
+        async (args) => formatStructuredResult(await pressKey(args)),
       );
       continue;
     }

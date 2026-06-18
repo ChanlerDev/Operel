@@ -301,4 +301,41 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("recovers by releasing modifiers", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "recover",
+        arguments: {},
+      });
+
+      expect(result.structuredContent).toEqual({
+        released: ["cmd", "shift", "option", "control"],
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("presses a key through MCP", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "press_key",
+        arguments: {
+          key: "Escape",
+          modifiers: [],
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        performed: true,
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });
