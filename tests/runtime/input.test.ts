@@ -49,4 +49,23 @@ describe("OperelRuntime input", () => {
       await client.close();
     }
   });
+
+  it("types text through the paste strategy and restores clipboard", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      const result = await client.request("input.type_text", {
+        text: "hello from operel",
+        strategy: "paste",
+        sensitive: false,
+      });
+
+      expect(result).toEqual({
+        strategy_used: "paste",
+        clipboard_restored: true,
+      });
+    } finally {
+      await client.close();
+    }
+  });
 });

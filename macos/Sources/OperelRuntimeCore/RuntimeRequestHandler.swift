@@ -60,6 +60,8 @@ public struct RuntimeRequestHandler {
             return try encode(releaseModifiersResponse(request: request))
         case "input.press_key":
             return try encode(pressKeyResponse(request: request))
+        case "input.type_text":
+            return try encode(typeTextResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -107,6 +109,9 @@ private struct RuntimeParams: Decodable {
     let max_nodes: Int?
     let key: String?
     let modifiers: [String]?
+    let text: String?
+    let strategy: String?
+    let sensitive: Bool?
 }
 
 private struct RuntimeResponse: Encodable {
@@ -448,6 +453,51 @@ private func keyCodeFor(key: String) -> CGKeyCode? {
     default:
         return nil
     }
+}
+
+private func typeTextResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    guard let text = request.params?.text else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "invalid_request",
+                message: "input.type_text requires text."
+            )
+        )
+    }
+
+    let pasteboard = NSPasteboard.general
+    let previousItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+        let copy = NSPasteboardItem()
+        for type in item.types {
+            if let data = item.data(forType: type) {
+                copy.setData(data, forType: type)
+            }
+        }
+        return copy
+    } ?? []
+
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
+    postKey(keyCode: 0x09, down: true, flags: [.maskCommand])
+    postKey(keyCode: 0x09, down: false, flags: [.maskCommand])
+
+    pasteboard.clearContents()
+    if !previousItems.isEmpty {
+        pasteboard.writeObjects(previousItems)
+    }
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "strategy_used": .string("paste"),
+            "clipboard_restored": .bool(true)
+        ]),
+        error: nil
+    )
 }
 
 private func listRunningApps() -> [JSONValue] {

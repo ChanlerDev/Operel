@@ -374,4 +374,47 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("requires approval for sensitive type_text input", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "type_text",
+        arguments: {
+          text: "sk-proj-sensitive123456789",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "approval_required",
+          message: "Action requires approval before typing sensitive text.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("types non-sensitive text through MCP", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "type_text",
+        arguments: {
+          text: "hello from operel",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        strategy_used: "paste",
+        clipboard_restored: true,
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

@@ -9,7 +9,7 @@ import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/acc
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 import { captureScreen } from "../runtime/screen.js";
-import { pressKey, releaseModifiers } from "../runtime/input.js";
+import { pressKey, releaseModifiers, typeText } from "../runtime/input.js";
 
 const mvpToolNames = [
   "start_session",
@@ -274,6 +274,34 @@ function registerTools(
           },
         },
         async (args) => formatStructuredResult(await pressKey(args)),
+      );
+      continue;
+    }
+
+    if (name === "type_text") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            text: z.string(),
+            sensitive: z.boolean().optional(),
+          },
+        },
+        async (args) => {
+          const decision = policy.evaluateAction({ tool: "type_text", text: args.text });
+          if (args.sensitive || decision.decision === "approval_required") {
+            return formatStructuredResult({
+              error: {
+                code: "approval_required",
+                message: "Action requires approval before typing sensitive text.",
+                recoverable: true,
+              },
+            });
+          }
+          return formatStructuredResult(await typeText({ text: args.text, strategy: "paste" }));
+        },
       );
       continue;
     }
