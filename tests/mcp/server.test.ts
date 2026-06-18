@@ -335,6 +335,44 @@ describe("Computer Use MCP server", () => {
         accessibility_tree_id: expect.stringMatching(/^tree_/),
         elements: expect.any(Array),
       });
+      const elements = (result.structuredContent as { elements: Array<{ element_id?: string }> }).elements;
+      if (elements.length > 0) {
+        expect(elements[0].element_id).toMatch(/^el_/);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns a recoverable error for unknown element_id clicks", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "clickel",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Click element" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "click",
+        arguments: {
+          session_id: sessionId,
+          element_id: "el_missing",
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "target_not_found",
+          message: "Unknown or expired element_id.",
+          recoverable: true,
+        },
+      });
     } finally {
       await server.close();
     }

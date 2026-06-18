@@ -51,6 +51,45 @@ describe("SessionStore", () => {
     expect(store.listSteps(session.session_id)).toEqual([step]);
   });
 
+  it("registers short-lived accessibility elements per session", () => {
+    const store = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "elementid",
+    });
+    const session = store.startSession({ task: "Observe elements" });
+
+    const elements = store.registerElements(session.session_id, "tree_1", [
+      {
+        runtime_handle: "",
+        role: "AXButton",
+        label: "Save",
+        value: "",
+        enabled: true,
+        frame: { x: 10, y: 20, width: 100, height: 40 },
+        children: [],
+      },
+    ]);
+
+    expect(elements).toEqual([
+      {
+        element_id: "el_elementid",
+        tree_id: "tree_1",
+        runtime_handle: "",
+        role: "AXButton",
+        label: "Save",
+        value: "",
+        enabled: true,
+        frame: { x: 10, y: 20, width: 100, height: 40 },
+        children: [],
+      },
+    ]);
+    expect(store.getElement(session.session_id, "el_elementid")).toMatchObject({
+      element_id: "el_elementid",
+      label: "Save",
+      frame: { x: 10, y: 20, width: 100, height: 40 },
+    });
+  });
+
   it("closes active sessions with the requested reason", () => {
     const store = new SessionStore({
       now: () => new Date("2026-06-18T00:00:00.000Z"),

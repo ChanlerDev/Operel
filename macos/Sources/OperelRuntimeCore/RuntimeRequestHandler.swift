@@ -250,8 +250,11 @@ private func accessibilityTreeResponse(request: RuntimeRequest) throws -> Runtim
     let maxDepth = max(1, min(request.params?.max_depth ?? 3, 20))
     let maxNodes = max(1, min(request.params?.max_nodes ?? 200, 2_000))
     var remainingNodes = maxNodes
-    let root = AXUIElementCreateSystemWide()
-    let nodes = readAXChildren(element: root, depth: 0, maxDepth: maxDepth, remainingNodes: &remainingNodes)
+    let nodes = readAccessibilityRoots(
+        request: request,
+        maxDepth: maxDepth,
+        remainingNodes: &remainingNodes
+    )
 
     return RuntimeResponse(
         jsonrpc: "2.0",
@@ -264,6 +267,44 @@ private func accessibilityTreeResponse(request: RuntimeRequest) throws -> Runtim
     )
 }
 
+private func readAccessibilityRoots(
+    request: RuntimeRequest,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> [JSONValue] {
+    let requestedName = request.params?.app
+    let requestedBundleID = request.params?.bundle_id ?? bundleIdentifierForApplicationName(requestedName)
+    let targetApps = findAccessibilityTargetApps(name: requestedName, bundleID: requestedBundleID)
+
+    if !targetApps.isEmpty {
+        return targetApps.flatMap { app in
+            let root = AXUIElementCreateApplication(app.processIdentifier)
+            return readAXChildrenFromKnownAttributes(
+                element: root,
+                depth: 0,
+                maxDepth: maxDepth,
+                remainingNodes: &remainingNodes
+            )
+        }
+    }
+
+    let root = AXUIElementCreateSystemWide()
+    return readAXChildren(element: root, depth: 0, maxDepth: maxDepth, remainingNodes: &remainingNodes)
+}
+
+private func findAccessibilityTargetApps(name: String?, bundleID: String?) -> [NSRunningApplication] {
+    let matched = findRunningApps(name: name, bundleID: bundleID)
+    if !matched.isEmpty {
+        return matched
+    }
+
+    if name == nil, bundleID == nil, let frontmost = NSWorkspace.shared.frontmostApplication {
+        return [frontmost]
+    }
+
+    return []
+}
+
 private func readAXChildren(
     element: AXUIElement,
     depth: Int,
@@ -274,23 +315,73 @@ private func readAXChildren(
         return []
     }
 
-    var rawChildren: CFTypeRef?
-    let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &rawChildren)
-    guard result == .success, let children = rawChildren as? [AXUIElement] else {
+    return readAXChildrenFromAttributes(
+        element: element,
+        attributes: [kAXChildrenAttribute],
+        depth: depth,
+        maxDepth: maxDepth,
+        remainingNodes: &remainingNodes
+    )
+}
+
+private func readAXChildrenFromKnownAttributes(
+    element: AXUIElement,
+    depth: Int,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> [JSONValue] {
+    readAXChildrenFromAttributes(
+        element: element,
+        attributes: [kAXWindowsAttribute, kAXChildrenAttribute],
+        depth: depth,
+        maxDepth: maxDepth,
+        remainingNodes: &remainingNodes
+    )
+}
+
+private func readAXChildrenFromAttributes(
+    element: AXUIElement,
+    attributes: [String],
+    depth: Int,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> [JSONValue] {
+    guard depth < maxDepth, remainingNodes > 0 else {
+        return []
+    }
+
+    let children = attributes.flatMap { readAXElementArray(element: element, attribute: $0) }
+    guard !children.isEmpty else {
         return []
     }
 
     var nodes: [JSONValue] = []
+    var seen = Set<String>()
     for child in children {
         guard remainingNodes > 0 else {
             break
         }
+
+        let fingerprint = String(describing: child)
+        guard !seen.contains(fingerprint) else {
+            continue
+        }
+        seen.insert(fingerprint)
 
         remainingNodes -= 1
         nodes.append(readAXNode(element: child, depth: depth + 1, maxDepth: maxDepth, remainingNodes: &remainingNodes))
     }
 
     return nodes
+}
+
+private func readAXElementArray(element: AXUIElement, attribute: String) -> [AXUIElement] {
+    var rawChildren: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &rawChildren)
+    guard result == .success, let children = rawChildren as? [AXUIElement] else {
+        return []
+    }
+    return children
 }
 
 private func readAXNode(

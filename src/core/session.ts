@@ -42,6 +42,21 @@ export type Step = {
   created_at: string;
 };
 
+export type ElementSnapshot = {
+  runtime_handle: string;
+  role: string;
+  label: string;
+  value: string;
+  enabled: boolean;
+  frame: { x: number; y: number; width: number; height: number };
+  children: ElementSnapshot[];
+};
+
+export type RegisteredElement = ElementSnapshot & {
+  element_id: string;
+  tree_id: string;
+};
+
 export type SessionStoreOptions = {
   now?: () => Date;
   id?: () => string;
@@ -52,6 +67,7 @@ export class SessionStore {
   private readonly id: () => string;
   private readonly sessions = new Map<string, Session>();
   private readonly steps = new Map<string, Step[]>();
+  private readonly elements = new Map<string, Map<string, RegisteredElement>>();
 
   constructor(options: SessionStoreOptions = {}) {
     this.now = options.now ?? (() => new Date());
@@ -89,6 +105,23 @@ export class SessionStore {
   listSteps(sessionId: string): Step[] {
     this.requireSession(sessionId);
     return (this.steps.get(sessionId) ?? []).map((step) => ({ ...step }));
+  }
+
+  registerElements(sessionId: string, treeId: string, elements: ElementSnapshot[]): RegisteredElement[] {
+    this.requireActiveSession(sessionId);
+    const registered = elements.map((element) => ({
+      ...cloneElement(element),
+      element_id: `el_${this.id()}`,
+      tree_id: treeId,
+    }));
+    this.elements.set(sessionId, new Map(registered.map((element) => [element.element_id, element])));
+    return registered.map(cloneRegisteredElement);
+  }
+
+  getElement(sessionId: string, elementId: string): RegisteredElement | undefined {
+    this.requireSession(sessionId);
+    const element = this.elements.get(sessionId)?.get(elementId);
+    return element ? cloneRegisteredElement(element) : undefined;
   }
 
   recordStep(sessionId: string, input: RecordStepInput): Step {
@@ -141,4 +174,20 @@ export class SessionStore {
     }
     return { ...session };
   }
+}
+
+function cloneElement(element: ElementSnapshot): ElementSnapshot {
+  return {
+    ...element,
+    frame: { ...element.frame },
+    children: element.children.map(cloneElement),
+  };
+}
+
+function cloneRegisteredElement(element: RegisteredElement): RegisteredElement {
+  return {
+    ...cloneElement(element),
+    element_id: element.element_id,
+    tree_id: element.tree_id,
+  };
 }

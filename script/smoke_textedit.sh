@@ -61,13 +61,17 @@ const session = await call("start_session", {
   app: "TextEdit",
 });
 await call("open_app", { session_id: session.session_id, app: "TextEdit" });
-await call("observe", {
+const observation = await call("observe", {
   session_id: session.session_id,
   app: "TextEdit",
   include_screenshot: true,
   include_accessibility_tree: true,
   max_tree_depth: 3,
 });
+const observedElements = observation.elements ?? [];
+if (!observedElements.some((element) => typeof element.element_id === "string" && element.element_id.startsWith("el_"))) {
+  throw new Error("observe did not return session-scoped element_id values");
+}
 await call("type_text", {
   session_id: session.session_id,
   text: `hello from operel smoke ${new Date().toISOString()}`,

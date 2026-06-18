@@ -18,6 +18,8 @@ export type AccessibilityTree = {
 };
 
 export async function readAccessibilityTree(input: {
+  app?: string;
+  bundle_id?: string;
   max_depth?: number;
   max_nodes?: number;
 } = {}): Promise<AccessibilityTree> {

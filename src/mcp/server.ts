@@ -115,7 +115,7 @@ function registerTools(
           const accessibility =
             args.include_accessibility_tree === false
               ? undefined
-              : await readAccessibilityTree({ max_depth: args.max_tree_depth });
+              : await readAccessibilityTree({ app: args.app, max_depth: args.max_tree_depth });
           const artifact = screenshot
             ? artifactStore.saveFileArtifact({
                 session_id: args.session_id,
@@ -125,7 +125,13 @@ function registerTools(
                 mime_type: "image/png",
               })
             : undefined;
-          const elements = accessibility ? flattenAccessibilityNodes(accessibility.nodes) : [];
+          const elements = accessibility
+            ? sessionStore.registerElements(
+                args.session_id,
+                accessibility.tree_id,
+                flattenAccessibilityNodes(accessibility.nodes),
+              )
+            : [];
           const result = {
             session_id: args.session_id,
             accessibility_tree_id: accessibility?.tree_id,
@@ -339,6 +345,7 @@ function registerTools(
           description: descriptionForTool(name),
           inputSchema: {
             session_id: z.string().optional(),
+            element_id: z.string().optional(),
             target: z.string().optional(),
             x: z.number().optional(),
             y: z.number().optional(),
@@ -349,7 +356,32 @@ function registerTools(
         async (args) => {
           try {
             let clickInput = args;
-            if (args.target && (args.x === undefined || args.y === undefined)) {
+            if (args.element_id) {
+              if (!args.session_id) {
+                return formatStructuredResult({
+                  error: {
+                    code: "session_expired",
+                    message: "element_id clicks require session_id.",
+                    recoverable: false,
+                  },
+                });
+              }
+              const element = sessionStore.getElement(args.session_id, args.element_id);
+              if (!element) {
+                return formatStructuredResult({
+                  error: {
+                    code: "target_not_found",
+                    message: "Unknown or expired element_id.",
+                    recoverable: true,
+                  },
+                });
+              }
+              clickInput = {
+                ...args,
+                x: Math.round(element.frame.x + element.frame.width / 2),
+                y: Math.round(element.frame.y + element.frame.height / 2),
+              };
+            } else if (args.target && (args.x === undefined || args.y === undefined)) {
               const accessibility = await readAccessibilityTree();
               const resolution = resolveClickTarget(
                 { target: args.target },
