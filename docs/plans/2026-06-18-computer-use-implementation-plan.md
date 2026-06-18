@@ -143,7 +143,7 @@ Before coding, implementers must read:
 ### Task 12: Artifact and audit store
 
 - [x] Write audit JSONL per session.
-- [ ] Save screenshots and tree snapshots.
+- [x] Save screenshots and tree snapshots.
 - [x] Redact sensitive tool inputs.
 - [x] Implement `export_session`.
 - [x] Commit: `feat: record computer use audit artifacts`
