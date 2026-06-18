@@ -21,6 +21,7 @@ export type CliServices = {
   writeError?: (chunk: string) => void;
   doctor?: () => Promise<DoctorResult>;
   call?: (tool: string, args: unknown) => Promise<unknown>;
+  readStdin?: () => Promise<string>;
   startMcp?: () => Promise<void>;
 };
 
@@ -55,10 +56,10 @@ export async function runCli(argv: string[], services: CliServices = {}): Promis
         return 0;
       }
       case "call": {
-        if (command.stdin) {
-          throw new Error("--stdin is not implemented yet");
-        }
-        const result = await (services.call ?? defaultCall)(command.tool, command.args);
+        const args = command.stdin
+          ? parseStdinJson(await (services.readStdin ?? readProcessStdin)())
+          : command.args;
+        const result = await (services.call ?? defaultCall)(command.tool, args);
         write(`${JSON.stringify(result, null, 2)}\n`);
         return 0;
       }
@@ -104,12 +105,35 @@ async function defaultDoctor(): Promise<DoctorResult> {
 }
 
 async function defaultCall(tool: string, args: unknown): Promise<unknown> {
+  const config = loadConfig();
+  const server = createComputerUseServer({
+    policy: new PolicyEngine({
+      apps: config.apps,
+    }),
+  });
+  const registeredTools = (server as unknown as {
+    _registeredTools?: Record<string, { handler: (args: unknown, extra: unknown) => Promise<{ structuredContent?: unknown }> }>;
+  })._registeredTools;
+  const registered = registeredTools?.[tool];
+
+  try {
+    if (!registered) {
+      return await callRuntimeMethod(tool, args);
+    }
+    const result = await registered.handler(args, {});
+    return result.structuredContent ?? {};
+  } finally {
+    await server.close();
+  }
+}
+
+async function callRuntimeMethod(method: string, args: unknown): Promise<unknown> {
   const helperPath =
     process.env.OPEREL_RUNTIME_HELPER ?? join(process.cwd(), "macos/.build/debug/OperelRuntime");
   const client = new RuntimeClient({ command: helperPath });
 
   try {
-    return await client.request(tool, args);
+    return await client.request(method, args);
   } finally {
     await client.close();
   }
@@ -124,4 +148,22 @@ async function defaultStartMcp(): Promise<void> {
   });
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+function parseStdinJson(raw: string): unknown {
+  try {
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    throw new Error("invalid JSON from stdin");
+  }
+}
+
+async function readProcessStdin(): Promise<string> {
+  process.stdin.setEncoding("utf8");
+
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
+  return input;
 }

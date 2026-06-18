@@ -53,6 +53,24 @@ describe("runCli", () => {
     expect(JSON.parse(writes.join(""))).toEqual({ ok: true });
   });
 
+  it("invokes call command with JSON args from stdin", async () => {
+    const writes: string[] = [];
+    const calls: unknown[] = [];
+
+    const exitCode = await runCli(["call", "observe", "--stdin"], {
+      write: (chunk) => writes.push(chunk),
+      readStdin: async () => "{\"app\":\"TextEdit\"}",
+      call: async (tool, args) => {
+        calls.push({ tool, args });
+        return { ok: true };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([{ tool: "observe", args: { app: "TextEdit" } }]);
+    expect(JSON.parse(writes.join(""))).toEqual({ ok: true });
+  });
+
   it("returns a usage error for invalid arguments", async () => {
     const errors: string[] = [];
 
