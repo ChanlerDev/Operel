@@ -577,18 +577,73 @@ private func clickResponse(request: RuntimeRequest) throws -> RuntimeResponse {
 }
 
 private func listRunningApps() -> [JSONValue] {
-    NSWorkspace.shared.runningApplications
+    let windowsByPID = visibleWindowsByProcessID()
+
+    return NSWorkspace.shared.runningApplications
         .filter { !$0.isTerminated }
         .map { app in
-            .object([
-                "app_id": .string("pid_\(app.processIdentifier)"),
-                "name": .string(app.localizedName ?? app.bundleIdentifier ?? "pid_\(app.processIdentifier)"),
-                "bundle_id": .string(app.bundleIdentifier ?? ""),
-                "pid": .int(Int(app.processIdentifier)),
+            let pid = Int(app.processIdentifier)
+            let fallbackName = "pid_\(pid)"
+            let name = app.localizedName ?? app.bundleIdentifier ?? fallbackName
+            let appID = "pid_\(pid)"
+            let bundleID = app.bundleIdentifier ?? ""
+            let windows = windowsByPID[pid] ?? []
+
+            return JSONValue.object([
+                "app_id": .string(appID),
+                "name": .string(name),
+                "bundle_id": .string(bundleID),
+                "pid": .int(pid),
                 "is_active": .bool(app.isActive),
-                "windows": .array([])
+                "windows": .array(windows)
             ])
         }
+}
+
+private func visibleWindowsByProcessID() -> [Int: [JSONValue]] {
+    guard let rawWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return [:]
+    }
+
+    var windowsByPID: [Int: [JSONValue]] = [:]
+
+    for window in rawWindows {
+        let layer = window[kCGWindowLayer as String] as? Int ?? -1
+        guard layer == 0 else {
+            continue
+        }
+
+        guard let pid = window[kCGWindowOwnerPID as String] as? Int else {
+            continue
+        }
+
+        let windowNumber = window[kCGWindowNumber as String] as? Int ?? 0
+        let title = window[kCGWindowName as String] as? String ?? ""
+        let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        let x = Int(bounds["X"] as? Double ?? 0)
+        let y = Int(bounds["Y"] as? Double ?? 0)
+        let width = Int(bounds["Width"] as? Double ?? 0)
+        let height = Int(bounds["Height"] as? Double ?? 0)
+
+        guard width > 0, height > 0 else {
+            continue
+        }
+
+        let value = JSONValue.object([
+            "window_id": .string("win_\(windowNumber)"),
+            "title": .string(title),
+            "bounds": .object([
+                "x": .int(x),
+                "y": .int(y),
+                "width": .int(width),
+                "height": .int(height)
+            ])
+        ])
+
+        windowsByPID[pid, default: []].append(value)
+    }
+
+    return windowsByPID
 }
 
 private func activateAppResponse(request: RuntimeRequest) throws -> RuntimeResponse {

@@ -41,4 +41,29 @@ describe("OperelRuntime apps.list", () => {
       await client.close();
     }
   });
+
+  it("includes visible windows reported by macOS", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      const result = (await client.request("apps.list", {})) as {
+        apps: Array<{ windows: unknown[] }>;
+      };
+
+      const windows = result.apps.flatMap((app) => app.windows);
+      expect(windows.length).toBeGreaterThan(0);
+      expect(windows[0]).toMatchObject({
+        window_id: expect.any(String),
+        title: expect.any(String),
+        bounds: {
+          x: expect.any(Number),
+          y: expect.any(Number),
+          width: expect.any(Number),
+          height: expect.any(Number),
+        },
+      });
+    } finally {
+      await client.close();
+    }
+  });
 });

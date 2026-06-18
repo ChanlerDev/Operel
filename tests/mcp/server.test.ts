@@ -208,6 +208,8 @@ describe("Computer Use MCP server", () => {
       expect(result.structuredContent).toMatchObject({
         windows: expect.any(Array),
       });
+      const windows = (result.structuredContent as { windows: unknown[] }).windows;
+      expect(windows.length).toBeGreaterThan(0);
     } finally {
       await server.close();
     }
