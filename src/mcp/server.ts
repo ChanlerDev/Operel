@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { ArtifactStore } from "../core/artifacts.js";
 import { PolicyEngine } from "../core/policy.js";
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
+import { resolveClickTarget } from "../core/targets.js";
 import { activateApp } from "../runtime/activate.js";
 import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/accessibility.js";
 import { listApps } from "../runtime/apps.js";
@@ -338,6 +339,7 @@ function registerTools(
           description: descriptionForTool(name),
           inputSchema: {
             session_id: z.string().optional(),
+            target: z.string().optional(),
             x: z.number().optional(),
             y: z.number().optional(),
             button: z.enum(["left", "right"]).optional(),
@@ -346,7 +348,19 @@ function registerTools(
         },
         async (args) => {
           try {
-            return await withOptionalSessionStep(sessionStore, args, name, () => click(args));
+            let clickInput = args;
+            if (args.target && (args.x === undefined || args.y === undefined)) {
+              const accessibility = await readAccessibilityTree();
+              const resolution = resolveClickTarget(
+                { target: args.target },
+                flattenAccessibilityNodes(accessibility.nodes),
+              );
+              if (!resolution.ok) {
+                return formatStructuredResult({ error: resolution.error });
+              }
+              clickInput = { ...args, ...resolution.click };
+            }
+            return await withOptionalSessionStep(sessionStore, args, name, () => click(clickInput));
           } catch (error) {
             return formatStructuredResult({
               error: {
