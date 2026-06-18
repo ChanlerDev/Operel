@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { parseCliArgs } from "./args.js";
-import { loadConfig } from "../core/config.js";
+import { defaultConfigPath, initConfig, loadConfig } from "../core/config.js";
 import { PolicyEngine } from "../core/policy.js";
 import { createComputerUseServer } from "../mcp/server.js";
 import { RuntimeClient } from "../runtime/client.js";
@@ -55,6 +55,18 @@ export async function runCli(argv: string[], services: CliServices = {}): Promis
         }
         return 0;
       }
+      case "config": {
+        if (command.action === "path") {
+          write(`${defaultConfigPath()}\n`);
+          return 0;
+        }
+        if (command.action === "init") {
+          write(`${JSON.stringify(initConfig(), null, 2)}\n`);
+          return 0;
+        }
+        write(`${JSON.stringify(redactConfig(loadConfig()), null, 2)}\n`);
+        return 0;
+      }
       case "call": {
         const args = command.stdin
           ? parseStdinJson(await (services.readStdin ?? readProcessStdin)())
@@ -77,9 +89,27 @@ export function helpText(): string {
     "Commands:",
     "  mcp                 Start the MCP server over stdio",
     "  doctor [--json]     Check macOS permissions and runtime health",
+    "  config <action>     Manage config path, init, and print",
     "  call <tool>         Invoke a tool for local debugging",
     "",
   ].join("\n");
+}
+
+function redactConfig(config: unknown): unknown {
+  if (Array.isArray(config)) {
+    return config.map(redactConfig);
+  }
+
+  if (config && typeof config === "object") {
+    return Object.fromEntries(
+      Object.entries(config).map(([key, value]) => [
+        key,
+        /password|token|secret|api[_-]?key/i.test(key) ? "[REDACTED]" : redactConfig(value),
+      ]),
+    );
+  }
+
+  return config;
 }
 
 function formatDoctor(result: DoctorResult): string {

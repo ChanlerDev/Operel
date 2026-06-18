@@ -27,6 +27,12 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("routes config subcommands", () => {
+    expect(parseCliArgs(["config", "path"])).toEqual({ command: "config", action: "path" });
+    expect(parseCliArgs(["config", "init"])).toEqual({ command: "config", action: "init" });
+    expect(parseCliArgs(["config", "print"])).toEqual({ command: "config", action: "print" });
+  });
+
   it("rejects call without tool name", () => {
     expect(() => parseCliArgs(["call"])).toThrow("call requires a tool name");
   });
@@ -35,5 +41,9 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["call", "observe", "--args", "{"])).toThrow(
       "invalid JSON for --args",
     );
+  });
+
+  it("rejects unknown config subcommands", () => {
+    expect(() => parseCliArgs(["config", "delete"])).toThrow("unknown config action: delete");
   });
 });

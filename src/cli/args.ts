@@ -2,6 +2,7 @@ export type CliCommand =
   | { command: "help" }
   | { command: "mcp" }
   | { command: "doctor"; json: boolean }
+  | { command: "config"; action: "path" | "init" | "print" }
   | { command: "call"; tool: string; args: unknown; stdin: boolean };
 
 export function parseCliArgs(argv: string[]): CliCommand {
@@ -23,7 +24,20 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return parseCallArgs(rest);
   }
 
+  if (command === "config") {
+    return parseConfigArgs(rest);
+  }
+
   throw new Error(`unknown command: ${command}`);
+}
+
+function parseConfigArgs(args: string[]): CliCommand {
+  const action = args[0] ?? "path";
+  if (action === "path" || action === "init" || action === "print") {
+    return { command: "config", action };
+  }
+
+  throw new Error(`unknown config action: ${action}`);
 }
 
 function parseCallArgs(args: string[]): CliCommand {

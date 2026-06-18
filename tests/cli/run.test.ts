@@ -71,6 +71,16 @@ describe("runCli", () => {
     expect(JSON.parse(writes.join(""))).toEqual({ ok: true });
   });
 
+  it("prints config path", async () => {
+    const writes: string[] = [];
+    const exitCode = await runCli(["config", "path"], {
+      write: (chunk) => writes.push(chunk),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(writes.join("")).toContain("config.toml");
+  });
+
   it("returns a usage error for invalid arguments", async () => {
     const errors: string[] = [];
 

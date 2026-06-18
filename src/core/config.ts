@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { parse } from "smol-toml";
 
@@ -47,11 +47,35 @@ export function loadConfig(path = defaultConfigPath()): OperelConfig {
   };
 }
 
+export function initConfig(path = defaultConfigPath()): { path: string; created: boolean } {
+  if (existsSync(path)) {
+    return { path, created: false };
+  }
+
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, defaultConfigText());
+  return { path, created: true };
+}
+
+export function defaultConfigText(): string {
+  return [
+    "[apps]",
+    'allowed = []',
+    'denied = ["System Settings", "Keychain Access"]',
+    'prompt = []',
+    "",
+    "[policy]",
+    "require_confirmation_for_risky_actions = true",
+    "redact_sensitive_text_in_logs = true",
+    "",
+  ].join("\n");
+}
+
 function defaultConfig(): OperelConfig {
   return {
     apps: {
       allowed: [],
-      denied: [],
+      denied: ["System Settings", "Keychain Access"],
       prompt: [],
     },
     policy: {
