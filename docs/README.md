@@ -25,17 +25,18 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - [架构决策](./decisions/ADR-0001-mac-first.md)：Mac 优先、MCP 入口、视觉加 Accessibility、并发边界的关键 ADR。
 - [参考资料](./references.md)：本设计使用的公开资料和需要持续跟踪的上游。
 
-## 首版建议
+## 当前实现
 
-首版不要尝试直接复刻完整的 Codex Computer Use 背景会话能力。更现实的 MVP 是：
+当前 MVP 已按实现计划落地。产品形态是：
 
 1. 一个 `operel-computer-use mcp` 命令，暴露稳定 MCP tools。
 2. 一个 `doctor` 命令，检查 Screen Recording、Accessibility、签名和 app policy。
-3. 一个 macOS runtime，支持截图、app/window 列表、Accessibility tree、点击、输入、按键、滚动、等待。
-4. 一个 session/action 日志层，能把每一步操作复现出来。
-5. 一个安全层，默认 app 级 allow/deny，风险动作按点确认。
+3. 一个 macOS runtime，支持截图、app/window/rect scoped screenshot、app/window 列表、Accessibility tree、点击、输入、按键、滚动、等待和恢复。
+4. 一个 session/action 日志层，支持 element ids、串行动作、cancel、timeout、artifact 保存和 audit export。
+5. 一个安全层，默认 app 级 allow/deny，敏感/破坏性/外发风险动作返回 approval，不默认执行。
+6. 两个 MCP client 安装入口：`install codex` 和 `install claude`。
 
-这条路径能让外部 Agent 尽早接入，并用真实桌面任务验证执行能力。
+真实验证路径见 [Release Notes](./release-notes.md)。
 
 ## 明确不承诺
 
@@ -43,7 +44,7 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 
 ## 当前文档成熟度
 
-这套文档现在的定位是“可实现规格”，不是最终用户手册。它已经覆盖：
+这套文档现在同时承担“实现规格”和“工程验收记录”的角色。它已经覆盖：
 
 - 入口：MCP、CLI、doctor、future App。
 - 运行时：Swift helper、macOS 权限、截图、AX tree、输入执行。
@@ -51,4 +52,4 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - 安全：app policy、风险动作、人类确认、日志脱敏。
 - 验收：MVP release gate、Mac smoke、Agent smoke。
 
-实现时按 [实现计划](./plans/2026-06-18-computer-use-implementation-plan.md) 拆任务即可。
+当前实现状态以 [实现计划](./plans/2026-06-18-computer-use-implementation-plan.md) 和 [Release Notes](./release-notes.md) 为准。
