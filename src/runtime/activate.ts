@@ -16,7 +16,7 @@ export type ActivateAppResult = {
 export async function activateApp(input: ActivateAppInput): Promise<ActivateAppResult> {
   const helperPath =
     process.env.OPEREL_RUNTIME_HELPER ?? join(process.cwd(), "macos/.build/debug/OperelRuntime");
-  const client = new RuntimeClient({ command: helperPath });
+  const client = new RuntimeClient({ command: helperPath, requestTimeoutMs: 12_000 });
 
   try {
     const result = await client.request("app.activate", input);

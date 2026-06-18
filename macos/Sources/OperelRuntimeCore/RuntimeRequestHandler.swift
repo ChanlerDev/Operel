@@ -648,15 +648,12 @@ private func visibleWindowsByProcessID() -> [Int: [JSONValue]] {
 
 private func activateAppResponse(request: RuntimeRequest) throws -> RuntimeResponse {
     let requestedName = request.params?.app
-    let requestedBundleID = request.params?.bundle_id
-    let candidates = NSWorkspace.shared.runningApplications.filter { app in
-        if let requestedBundleID, app.bundleIdentifier == requestedBundleID {
-            return true
-        }
-        if let requestedName, app.localizedName == requestedName {
-            return true
-        }
-        return false
+    let requestedBundleID = request.params?.bundle_id ?? bundleIdentifierForApplicationName(requestedName)
+    var candidates = findRunningApps(name: requestedName, bundleID: requestedBundleID)
+
+    if candidates.isEmpty {
+        launchApp(name: requestedName, bundleID: requestedBundleID)
+        candidates = waitForRunningApp(name: requestedName, bundleID: requestedBundleID)
     }
 
     guard let app = candidates.first else {
@@ -682,6 +679,60 @@ private func activateAppResponse(request: RuntimeRequest) throws -> RuntimeRespo
         ]),
         error: nil
     )
+}
+
+private func findRunningApps(name: String?, bundleID: String?) -> [NSRunningApplication] {
+    NSWorkspace.shared.runningApplications.filter { app in
+        if let bundleID, !bundleID.isEmpty, app.bundleIdentifier == bundleID {
+            return true
+        }
+        if let name, !name.isEmpty, app.localizedName == name {
+            return true
+        }
+        return false
+    }
+}
+
+private func waitForRunningApp(name: String?, bundleID: String?) -> [NSRunningApplication] {
+    let deadline = Date().addingTimeInterval(5)
+
+    while Date() < deadline {
+        let candidates = findRunningApps(name: name, bundleID: bundleID)
+        if !candidates.isEmpty {
+            return candidates
+        }
+        usleep(100_000)
+    }
+
+    return findRunningApps(name: name, bundleID: bundleID)
+}
+
+private func launchApp(name: String?, bundleID: String?) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+
+    if let bundleID, !bundleID.isEmpty {
+        process.arguments = ["-b", bundleID]
+    } else if let name, !name.isEmpty {
+        process.arguments = ["-a", name]
+    } else {
+        return
+    }
+
+    try? process.run()
+    process.waitUntilExit()
+}
+
+private func bundleIdentifierForApplicationName(_ name: String?) -> String? {
+    guard let name, !name.isEmpty else {
+        return nil
+    }
+
+    guard let path = NSWorkspace.shared.fullPath(forApplication: name) else {
+        return nil
+    }
+
+    return Bundle(path: path)?.bundleIdentifier
 }
 
 private struct DynamicCodingKey: CodingKey {
