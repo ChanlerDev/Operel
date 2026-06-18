@@ -485,16 +485,12 @@ function registerTools(
       continue;
     }
 
-    server.registerTool(
-      name,
-      {
-        title: titleForTool(name),
-        description: descriptionForTool(name),
-        inputSchema: z.object({}).passthrough(),
-      },
-      async (args) => formatStructuredResult({ status: "not_implemented", tool: name, args }),
-    );
+    assertNever(name);
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled MCP tool: ${String(value)}`);
 }
 
 function registerResources(server: McpServer, sessionStore: SessionStore): void {
