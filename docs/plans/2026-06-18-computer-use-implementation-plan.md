@@ -152,12 +152,12 @@ Before coding, implementers must read:
 
 ### Task 13: Real Mac smoke
 
-- [ ] Run `doctor` on a signed local build.
+- [x] Run `doctor` on a signed local build.
 - [x] Grant Screen Recording and Accessibility.
 - [x] Run TextEdit observe/type smoke.
 - [x] Export session and inspect artifacts.
-- [ ] Document exact commands in release notes.
-- [ ] Commit: `test: add macos smoke checklist`
+- [x] Document exact commands in release notes.
+- [x] Commit: `test: add macos smoke checklist`
 
 ### Task 14: Agent integration smoke
 

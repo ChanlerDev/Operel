@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "smoke:agent": "./script/smoke_agent.sh",
+    "smoke:signed-doctor": "./script/smoke_signed_doctor.sh",
     "smoke:textedit": "./script/smoke_textedit.sh",
     "test": "vitest run",
     "test:watch": "vitest",
