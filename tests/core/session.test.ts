@@ -90,6 +90,44 @@ describe("SessionStore", () => {
     });
   });
 
+  it("expires previous element ids when a new tree is registered", () => {
+    const ids = ["first", "second"];
+    const store = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => ids.shift() ?? "extra",
+    });
+    const session = store.startSession({ task: "Observe stale elements" });
+
+    const [first] = store.registerElements(session.session_id, "tree_1", [
+      {
+        runtime_handle: "",
+        role: "AXButton",
+        label: "Save",
+        value: "",
+        enabled: true,
+        frame: { x: 10, y: 20, width: 100, height: 40 },
+        children: [],
+      },
+    ]);
+    const [second] = store.registerElements(session.session_id, "tree_2", [
+      {
+        runtime_handle: "",
+        role: "AXButton",
+        label: "Cancel",
+        value: "",
+        enabled: true,
+        frame: { x: 20, y: 30, width: 100, height: 40 },
+        children: [],
+      },
+    ]);
+
+    expect(store.getElement(session.session_id, first.element_id)).toBeUndefined();
+    expect(store.getElement(session.session_id, second.element_id)).toMatchObject({
+      label: "Cancel",
+      tree_id: "tree_2",
+    });
+  });
+
   it("closes active sessions with the requested reason", () => {
     const store = new SessionStore({
       now: () => new Date("2026-06-18T00:00:00.000Z"),
