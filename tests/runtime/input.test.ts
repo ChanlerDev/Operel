@@ -99,4 +99,28 @@ describe("OperelRuntime input", () => {
       await client.close();
     }
   });
+
+  it("falls back to coordinate click when AX target is not matched", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      const result = await client.request("input.click", {
+        x: 0,
+        y: 0,
+        ax_role: "AXButton",
+        ax_label: "Operel Missing AX Target",
+        ax_x: 0,
+        ax_y: 0,
+        ax_width: 10,
+        ax_height: 10,
+      });
+
+      expect(result).toMatchObject({
+        performed: true,
+        strategy_used: "cg_event",
+      });
+    } finally {
+      await client.close();
+    }
+  });
 });

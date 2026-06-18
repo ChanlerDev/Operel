@@ -366,6 +366,8 @@ function registerTools(
             session_id: z.string().optional(),
             element_id: z.string().optional(),
             target: z.string().optional(),
+            app: z.string().optional(),
+            bundle_id: z.string().optional(),
             x: z.number().optional(),
             y: z.number().optional(),
             button: z.enum(["left", "right"]).optional(),
@@ -374,7 +376,7 @@ function registerTools(
         },
         async (args) => {
           try {
-            let clickInput = args;
+            let clickInput: Record<string, unknown> = args;
             if (args.element_id) {
               if (!args.session_id) {
                 return formatStructuredResult({
@@ -399,6 +401,14 @@ function registerTools(
                 ...args,
                 x: Math.round(element.frame.x + element.frame.width / 2),
                 y: Math.round(element.frame.y + element.frame.height / 2),
+                app: args.app ?? sessionStore.getSession(args.session_id)?.app,
+                ax_role: element.role,
+                ax_label: element.label,
+                ax_value: element.value,
+                ax_x: element.frame.x,
+                ax_y: element.frame.y,
+                ax_width: element.frame.width,
+                ax_height: element.frame.height,
               };
             } else if (args.target && (args.x === undefined || args.y === undefined)) {
               const accessibility = await readAccessibilityTree();

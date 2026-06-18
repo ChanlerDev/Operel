@@ -35,6 +35,15 @@ export async function click(input: {
   y?: number;
   button?: "left" | "right";
   click_count?: number;
+  app?: string;
+  bundle_id?: string;
+  ax_role?: string;
+  ax_label?: string;
+  ax_value?: string;
+  ax_x?: number;
+  ax_y?: number;
+  ax_width?: number;
+  ax_height?: number;
 }): Promise<{ performed: boolean }> {
   return runtimeRequest("input.click", input);
 }

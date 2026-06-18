@@ -178,6 +178,13 @@ private struct RuntimeParams: Decodable {
     let sensitive: Bool?
     let x: Double?
     let y: Double?
+    let ax_role: String?
+    let ax_label: String?
+    let ax_value: String?
+    let ax_x: Double?
+    let ax_y: Double?
+    let ax_width: Double?
+    let ax_height: Double?
     let delta_x: Double?
     let delta_y: Double?
     let button: String?
@@ -689,6 +696,18 @@ private func scrollResponse(request: RuntimeRequest) throws -> RuntimeResponse {
 }
 
 private func clickResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    if tryPerformAXPress(request: request) {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: .object([
+                "performed": .bool(true),
+                "strategy_used": .string("ax_press")
+            ]),
+            error: nil
+        )
+    }
+
     guard let x = request.params?.x, let y = request.params?.y else {
         return RuntimeResponse(
             jsonrpc: "2.0",
@@ -721,10 +740,124 @@ private func clickResponse(request: RuntimeRequest) throws -> RuntimeResponse {
         jsonrpc: "2.0",
         id: request.id,
         result: .object([
-            "performed": .bool(true)
+            "performed": .bool(true),
+            "strategy_used": .string("cg_event")
         ]),
         error: nil
     )
+}
+
+private func tryPerformAXPress(request: RuntimeRequest) -> Bool {
+    guard hasAXTarget(request: request) else {
+        return false
+    }
+
+    let requestedName = request.params?.app
+    let requestedBundleID = request.params?.bundle_id ?? bundleIdentifierForApplicationName(requestedName)
+    var remainingNodes = 1_000
+    let roots = findAccessibilityTargetApps(name: requestedName, bundleID: requestedBundleID).map {
+        AXUIElementCreateApplication($0.processIdentifier)
+    }
+
+    let searchRoots: [AXUIElement]
+    if roots.isEmpty {
+        searchRoots = [AXUIElementCreateSystemWide()]
+    } else {
+        searchRoots = roots
+    }
+
+    for root in searchRoots {
+        if let match = findAXTarget(
+            element: root,
+            request: request,
+            depth: 0,
+            maxDepth: 20,
+            remainingNodes: &remainingNodes
+        ) {
+            return AXUIElementPerformAction(match, kAXPressAction as CFString) == .success
+        }
+    }
+
+    return false
+}
+
+private func hasAXTarget(request: RuntimeRequest) -> Bool {
+    request.params?.ax_role != nil ||
+        request.params?.ax_label != nil ||
+        request.params?.ax_value != nil
+}
+
+private func findAXTarget(
+    element: AXUIElement,
+    request: RuntimeRequest,
+    depth: Int,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> AXUIElement? {
+    guard depth <= maxDepth, remainingNodes > 0 else {
+        return nil
+    }
+
+    remainingNodes -= 1
+    if axElementMatchesTarget(element: element, request: request) {
+        return element
+    }
+
+    for child in readAXElementArray(element: element, attribute: kAXWindowsAttribute) +
+        readAXElementArray(element: element, attribute: kAXChildrenAttribute) {
+        if let match = findAXTarget(
+            element: child,
+            request: request,
+            depth: depth + 1,
+            maxDepth: maxDepth,
+            remainingNodes: &remainingNodes
+        ) {
+            return match
+        }
+    }
+
+    return nil
+}
+
+private func axElementMatchesTarget(element: AXUIElement, request: RuntimeRequest) -> Bool {
+    let role = readAXString(element: element, attribute: kAXRoleAttribute)
+    let label = firstNonEmpty([
+        readAXString(element: element, attribute: kAXTitleAttribute),
+        readAXString(element: element, attribute: kAXDescriptionAttribute),
+        readAXString(element: element, attribute: kAXHelpAttribute)
+    ])
+    let value = readAXString(element: element, attribute: kAXValueAttribute)
+    let frame = readAXFrame(element: element)
+
+    if let targetRole = request.params?.ax_role, !targetRole.isEmpty, role != targetRole {
+        return false
+    }
+    if let targetLabel = request.params?.ax_label, !targetLabel.isEmpty, label != targetLabel {
+        return false
+    }
+    if let targetValue = request.params?.ax_value, !targetValue.isEmpty, value != targetValue {
+        return false
+    }
+
+    return frameMatchesTarget(frame: frame, request: request)
+}
+
+private func frameMatchesTarget(
+    frame: (x: Int, y: Int, width: Int, height: Int),
+    request: RuntimeRequest
+) -> Bool {
+    guard let x = request.params?.ax_x,
+          let y = request.params?.ax_y,
+          let width = request.params?.ax_width,
+          let height = request.params?.ax_height else {
+        return true
+    }
+
+    let tolerance = 3.0
+    return abs(Double(frame.x) - x) <= tolerance &&
+        abs(Double(frame.y) - y) <= tolerance &&
+        abs(Double(frame.width) - width) <= tolerance &&
+        abs(Double(frame.height) - height) <= tolerance
 }
 
 private func listRunningApps() -> [JSONValue] {
