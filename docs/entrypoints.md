@@ -39,6 +39,45 @@ MCP 是首选入口。Agent 配置：
 
 MCP client 不应直接知道 Swift helper 的存在。
 
+### 安装 MCP 配置
+
+Codex:
+
+```bash
+operel-computer-use install codex
+```
+
+默认写入 `~/.codex/config.toml`，新增或替换：
+
+```toml
+[mcp_servers.operel-computer-use]
+type = "stdio"
+command = "operel-computer-use"
+args = ["mcp"]
+```
+
+Claude Code:
+
+```bash
+operel-computer-use install claude
+```
+
+默认写入 `~/.claude/settings.json` 的 `mcpServers.operel-computer-use`：
+
+```json
+{
+  "command": "operel-computer-use",
+  "args": ["mcp"]
+}
+```
+
+两个安装命令都会在覆盖前创建 `.bak.<timestamp>` 备份。开发或测试时可显式指定路径和命令：
+
+```bash
+operel-computer-use install codex --config-path /tmp/codex.toml --command /abs/path/to/operel-computer-use
+operel-computer-use install claude --config-path /tmp/settings.json --command /abs/path/to/operel-computer-use
+```
+
 ## 典型 Agent 调用流
 
 ### 低风险观察任务

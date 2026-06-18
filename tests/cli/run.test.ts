@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
 import { describe, expect, it } from "vitest";
 
 import { runCli } from "../../src/cli/run.js";
@@ -103,6 +107,26 @@ describe("runCli", () => {
 
     expect(exitCode).toBe(0);
     expect(writes.join("")).toContain("config.toml");
+  });
+
+  it("installs MCP config from the CLI", async () => {
+    const writes: string[] = [];
+    const root = mkdtempSync(join(tmpdir(), "operel-cli-install-"));
+    const configPath = join(root, "config.toml");
+
+    const exitCode = await runCli(["install", "codex", "--config-path", configPath, "--command", "operel-dev"], {
+      write: (chunk) => writes.push(chunk),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(writes.join(""))).toMatchObject({
+      client: "codex",
+      server_name: "operel-computer-use",
+      config_path: configPath,
+      command: "operel-dev",
+      args: ["mcp"],
+    });
+    expect(readFileSync(configPath, "utf8")).toContain('command = "operel-dev"');
   });
 
   it("returns a usage error for invalid arguments", async () => {

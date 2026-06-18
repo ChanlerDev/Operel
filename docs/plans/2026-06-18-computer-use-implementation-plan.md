@@ -161,8 +161,8 @@ Before coding, implementers must read:
 
 ### Task 14: Agent integration smoke
 
-- [ ] Install MCP config for Codex.
-- [ ] Install MCP config for Claude Code or another MCP client.
+- [x] Install MCP config for Codex.
+- [x] Install MCP config for Claude Code or another MCP client.
 - [x] Verify `tools/list`.
 - [x] Run one low-risk GUI task.
 - [x] Commit: `test: add agent integration smoke`

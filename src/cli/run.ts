@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { parseCliArgs } from "./args.js";
 import { defaultConfigPath, initConfig, loadConfig } from "../core/config.js";
+import { installMcpConfig } from "../core/mcp-install.js";
 import { PolicyEngine } from "../core/policy.js";
 import { createComputerUseServer } from "../mcp/server.js";
 import { RuntimeClient } from "../runtime/client.js";
@@ -83,6 +84,15 @@ export async function runCli(argv: string[], services: CliServices = {}): Promis
         write(`${JSON.stringify(redactConfig(loadConfig()), null, 2)}\n`);
         return 0;
       }
+      case "install": {
+        const result = installMcpConfig({
+          client: command.client,
+          configPath: command.configPath,
+          command: command.serverCommand,
+        });
+        write(`${JSON.stringify(result, null, 2)}\n`);
+        return 0;
+      }
       case "call": {
         const args = command.stdin
           ? parseStdinJson(await (services.readStdin ?? readProcessStdin)())
@@ -106,6 +116,7 @@ export function helpText(): string {
     "  mcp                 Start the MCP server over stdio",
     "  doctor [--json]     Check macOS permissions and runtime health",
     "  config <action>     Manage config path, init, and print",
+    "  install <client>     Install MCP config for codex or claude",
     "  call <tool>         Invoke a tool for local debugging",
     "",
   ].join("\n");

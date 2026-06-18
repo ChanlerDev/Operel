@@ -33,6 +33,21 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["config", "print"])).toEqual({ command: "config", action: "print" });
   });
 
+  it("routes install subcommands", () => {
+    expect(parseCliArgs(["install", "codex"])).toEqual({
+      command: "install",
+      client: "codex",
+      configPath: undefined,
+      serverCommand: undefined,
+    });
+    expect(parseCliArgs(["install", "claude", "--config-path", "/tmp/settings.json", "--command", "node"])).toEqual({
+      command: "install",
+      client: "claude",
+      configPath: "/tmp/settings.json",
+      serverCommand: "node",
+    });
+  });
+
   it("rejects call without tool name", () => {
     expect(() => parseCliArgs(["call"])).toThrow("call requires a tool name");
   });
@@ -45,5 +60,10 @@ describe("parseCliArgs", () => {
 
   it("rejects unknown config subcommands", () => {
     expect(() => parseCliArgs(["config", "delete"])).toThrow("unknown config action: delete");
+  });
+
+  it("rejects invalid install arguments", () => {
+    expect(() => parseCliArgs(["install"])).toThrow("install requires client: codex or claude");
+    expect(() => parseCliArgs(["install", "codex", "--missing"])).toThrow("unknown install option: --missing");
   });
 });

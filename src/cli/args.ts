@@ -3,6 +3,7 @@ export type CliCommand =
   | { command: "mcp" }
   | { command: "doctor"; json: boolean }
   | { command: "config"; action: "path" | "init" | "print" }
+  | { command: "install"; client: "codex" | "claude"; configPath?: string; serverCommand?: string }
   | { command: "call"; tool: string; args: unknown; stdin: boolean };
 
 export function parseCliArgs(argv: string[]): CliCommand {
@@ -28,6 +29,10 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return parseConfigArgs(rest);
   }
 
+  if (command === "install") {
+    return parseInstallArgs(rest);
+  }
+
   throw new Error(`unknown command: ${command}`);
 }
 
@@ -38,6 +43,33 @@ function parseConfigArgs(args: string[]): CliCommand {
   }
 
   throw new Error(`unknown config action: ${action}`);
+}
+
+function parseInstallArgs(args: string[]): CliCommand {
+  const client = args[0];
+  if (client !== "codex" && client !== "claude") {
+    throw new Error("install requires client: codex or claude");
+  }
+
+  let configPath: string | undefined;
+  let serverCommand: string | undefined;
+
+  for (let index = 1; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === "--config-path") {
+      configPath = requireValue(args, index, token);
+      index += 1;
+      continue;
+    }
+    if (token === "--command") {
+      serverCommand = requireValue(args, index, token);
+      index += 1;
+      continue;
+    }
+    throw new Error(`unknown install option: ${token}`);
+  }
+
+  return { command: "install", client, configPath, serverCommand };
 }
 
 function parseCallArgs(args: string[]): CliCommand {
@@ -80,4 +112,12 @@ function parseJsonArgs(rawJson: string): unknown {
   } catch {
     throw new Error("invalid JSON for --args");
   }
+}
+
+function requireValue(args: string[], index: number, option: string): string {
+  const value = args[index + 1];
+  if (value === undefined) {
+    throw new Error(`${option} requires a value`);
+  }
+  return value;
 }
