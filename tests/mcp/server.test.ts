@@ -417,4 +417,47 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("scrolls through MCP", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "scroll",
+        arguments: {
+          x: 0,
+          y: 0,
+          delta_x: 0,
+          delta_y: 0,
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        performed: true,
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns runtime errors for invalid click calls", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "click",
+        arguments: {},
+      });
+
+      expect(result.structuredContent).toEqual({
+        error: {
+          code: "action_failed",
+          message: "input.click requires x and y coordinates.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

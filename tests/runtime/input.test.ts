@@ -68,4 +68,35 @@ describe("OperelRuntime input", () => {
       await client.close();
     }
   });
+
+  it("accepts a zero-distance scroll request", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      const result = await client.request("input.scroll", {
+        x: 0,
+        y: 0,
+        delta_x: 0,
+        delta_y: 0,
+      });
+
+      expect(result).toEqual({
+        performed: true,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("rejects click requests without coordinates or element handles", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      await expect(client.request("input.click", {})).rejects.toThrow(
+        "input.click requires x and y coordinates.",
+      );
+    } finally {
+      await client.close();
+    }
+  });
 });

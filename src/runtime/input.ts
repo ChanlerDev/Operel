@@ -21,6 +21,24 @@ export async function typeText(input: {
   return runtimeRequest("input.type_text", input);
 }
 
+export async function scroll(input: {
+  x?: number;
+  y?: number;
+  delta_x?: number;
+  delta_y?: number;
+}): Promise<{ performed: boolean }> {
+  return runtimeRequest("input.scroll", input);
+}
+
+export async function click(input: {
+  x?: number;
+  y?: number;
+  button?: "left" | "right";
+  click_count?: number;
+}): Promise<{ performed: boolean }> {
+  return runtimeRequest("input.click", input);
+}
+
 async function runtimeRequest<T>(method: string, params: unknown): Promise<T> {
   const helperPath =
     process.env.OPEREL_RUNTIME_HELPER ?? join(process.cwd(), "macos/.build/debug/OperelRuntime");

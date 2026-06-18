@@ -9,7 +9,7 @@ import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/acc
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 import { captureScreen } from "../runtime/screen.js";
-import { pressKey, releaseModifiers, typeText } from "../runtime/input.js";
+import { click, pressKey, releaseModifiers, scroll, typeText } from "../runtime/input.js";
 
 const mvpToolNames = [
   "start_session",
@@ -301,6 +301,54 @@ function registerTools(
             });
           }
           return formatStructuredResult(await typeText({ text: args.text, strategy: "paste" }));
+        },
+      );
+      continue;
+    }
+
+    if (name === "scroll") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            x: z.number().optional(),
+            y: z.number().optional(),
+            delta_x: z.number().optional(),
+            delta_y: z.number().optional(),
+          },
+        },
+        async (args) => formatStructuredResult(await scroll(args)),
+      );
+      continue;
+    }
+
+    if (name === "click") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            x: z.number().optional(),
+            y: z.number().optional(),
+            button: z.enum(["left", "right"]).optional(),
+            click_count: z.number().optional(),
+          },
+        },
+        async (args) => {
+          try {
+            return formatStructuredResult(await click(args));
+          } catch (error) {
+            return formatStructuredResult({
+              error: {
+                code: "action_failed",
+                message: error instanceof Error ? error.message : String(error),
+                recoverable: true,
+              },
+            });
+          }
         },
       );
       continue;

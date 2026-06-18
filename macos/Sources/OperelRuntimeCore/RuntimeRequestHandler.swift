@@ -62,6 +62,10 @@ public struct RuntimeRequestHandler {
             return try encode(pressKeyResponse(request: request))
         case "input.type_text":
             return try encode(typeTextResponse(request: request))
+        case "input.scroll":
+            return try encode(scrollResponse(request: request))
+        case "input.click":
+            return try encode(clickResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -112,6 +116,12 @@ private struct RuntimeParams: Decodable {
     let text: String?
     let strategy: String?
     let sensitive: Bool?
+    let x: Double?
+    let y: Double?
+    let delta_x: Double?
+    let delta_y: Double?
+    let button: String?
+    let click_count: Int?
 }
 
 private struct RuntimeResponse: Encodable {
@@ -495,6 +505,72 @@ private func typeTextResponse(request: RuntimeRequest) throws -> RuntimeResponse
         result: .object([
             "strategy_used": .string("paste"),
             "clipboard_restored": .bool(true)
+        ]),
+        error: nil
+    )
+}
+
+private func scrollResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    let deltaX = Int32(request.params?.delta_x ?? 0)
+    let deltaY = Int32(request.params?.delta_y ?? 0)
+    let point = CGPoint(x: request.params?.x ?? 0, y: request.params?.y ?? 0)
+
+    if let event = CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 2,
+        wheel1: deltaY,
+        wheel2: deltaX,
+        wheel3: 0
+    ) {
+        event.location = point
+        event.post(tap: .cghidEventTap)
+    }
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "performed": .bool(true)
+        ]),
+        error: nil
+    )
+}
+
+private func clickResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    guard let x = request.params?.x, let y = request.params?.y else {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "invalid_request",
+                message: "input.click requires x and y coordinates."
+            )
+        )
+    }
+
+    let point = CGPoint(x: x, y: y)
+    let buttonName = request.params?.button ?? "left"
+    let button: CGMouseButton = buttonName == "right" ? .right : .left
+    let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
+    let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+    let clickCount = max(1, request.params?.click_count ?? 1)
+
+    for _ in 0..<clickCount {
+        if let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: point, mouseButton: button) {
+            down.post(tap: .cghidEventTap)
+        }
+        if let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: point, mouseButton: button) {
+            up.post(tap: .cghidEventTap)
+        }
+    }
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "performed": .bool(true)
         ]),
         error: nil
     )
