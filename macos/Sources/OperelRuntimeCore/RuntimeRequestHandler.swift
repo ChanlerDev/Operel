@@ -54,6 +54,8 @@ public struct RuntimeRequestHandler {
             return try encode(activateAppResponse(request: request))
         case "screen.capture":
             return try encode(screenCaptureResponse(request: request))
+        case "ax.read_tree":
+            return try encode(accessibilityTreeResponse(request: request))
         default:
             return try encode(RuntimeResponse(
                 jsonrpc: "2.0",
@@ -97,6 +99,8 @@ private struct RuntimeRequest: Decodable {
 private struct RuntimeParams: Decodable {
     let app: String?
     let bundle_id: String?
+    let max_depth: Int?
+    let max_nodes: Int?
 }
 
 private struct RuntimeResponse: Encodable {
@@ -219,6 +223,120 @@ private func screenCaptureResponse(request: RuntimeRequest) throws -> RuntimeRes
         ]),
         error: nil
     )
+}
+
+private func accessibilityTreeResponse(request: RuntimeRequest) throws -> RuntimeResponse {
+    let maxDepth = max(1, min(request.params?.max_depth ?? 3, 20))
+    let maxNodes = max(1, min(request.params?.max_nodes ?? 200, 2_000))
+    var remainingNodes = maxNodes
+    let root = AXUIElementCreateSystemWide()
+    let nodes = readAXChildren(element: root, depth: 0, maxDepth: maxDepth, remainingNodes: &remainingNodes)
+
+    return RuntimeResponse(
+        jsonrpc: "2.0",
+        id: request.id,
+        result: .object([
+            "tree_id": .string("tree_\(UUID().uuidString)"),
+            "nodes": .array(nodes)
+        ]),
+        error: nil
+    )
+}
+
+private func readAXChildren(
+    element: AXUIElement,
+    depth: Int,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> [JSONValue] {
+    guard depth < maxDepth, remainingNodes > 0 else {
+        return []
+    }
+
+    var rawChildren: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &rawChildren)
+    guard result == .success, let children = rawChildren as? [AXUIElement] else {
+        return []
+    }
+
+    var nodes: [JSONValue] = []
+    for child in children {
+        guard remainingNodes > 0 else {
+            break
+        }
+
+        remainingNodes -= 1
+        nodes.append(readAXNode(element: child, depth: depth + 1, maxDepth: maxDepth, remainingNodes: &remainingNodes))
+    }
+
+    return nodes
+}
+
+private func readAXNode(
+    element: AXUIElement,
+    depth: Int,
+    maxDepth: Int,
+    remainingNodes: inout Int
+) -> JSONValue {
+    let frame = readAXFrame(element: element)
+    return .object([
+        "runtime_handle": .string(""),
+        "role": .string(readAXString(element: element, attribute: kAXRoleAttribute)),
+        "label": .string(firstNonEmpty([
+            readAXString(element: element, attribute: kAXTitleAttribute),
+            readAXString(element: element, attribute: kAXDescriptionAttribute),
+            readAXString(element: element, attribute: kAXHelpAttribute)
+        ])),
+        "value": .string(readAXString(element: element, attribute: kAXValueAttribute)),
+        "enabled": .bool(readAXBool(element: element, attribute: kAXEnabledAttribute) ?? true),
+        "frame": .object([
+            "x": .int(frame.x),
+            "y": .int(frame.y),
+            "width": .int(frame.width),
+            "height": .int(frame.height)
+        ]),
+        "children": .array(readAXChildren(element: element, depth: depth, maxDepth: maxDepth, remainingNodes: &remainingNodes))
+    ])
+}
+
+private func readAXString(element: AXUIElement, attribute: String) -> String {
+    var rawValue: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &rawValue)
+    guard result == .success, let rawValue else {
+        return ""
+    }
+    return String(describing: rawValue)
+}
+
+private func readAXBool(element: AXUIElement, attribute: String) -> Bool? {
+    var rawValue: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &rawValue)
+    guard result == .success else {
+        return nil
+    }
+    return rawValue as? Bool
+}
+
+private func readAXFrame(element: AXUIElement) -> (x: Int, y: Int, width: Int, height: Int) {
+    var positionValue: CFTypeRef?
+    var sizeValue: CFTypeRef?
+    let positionResult = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue)
+    let sizeResult = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue)
+
+    var point = CGPoint.zero
+    var size = CGSize.zero
+    if positionResult == .success, let positionValue, CFGetTypeID(positionValue) == AXValueGetTypeID() {
+        AXValueGetValue(positionValue as! AXValue, .cgPoint, &point)
+    }
+    if sizeResult == .success, let sizeValue, CFGetTypeID(sizeValue) == AXValueGetTypeID() {
+        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+    }
+
+    return (Int(point.x), Int(point.y), Int(size.width), Int(size.height))
+}
+
+private func firstNonEmpty(_ values: [String]) -> String {
+    values.first { !$0.isEmpty } ?? ""
 }
 
 private func listRunningApps() -> [JSONValue] {

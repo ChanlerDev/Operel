@@ -267,4 +267,38 @@ describe("Computer Use MCP server", () => {
       await server.close();
     }
   });
+
+  it("observes accessibility elements when requested", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "axobserve",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Observe accessibility" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          session_id: sessionId,
+          include_screenshot: false,
+          include_accessibility_tree: true,
+          max_tree_depth: 2,
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        session_id: sessionId,
+        accessibility_tree_id: expect.stringMatching(/^tree_/),
+        elements: expect.any(Array),
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });

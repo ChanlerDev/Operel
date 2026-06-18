@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { ArtifactStore } from "../core/artifacts.js";
 import { type CloseSessionReason, SessionStore } from "../core/session.js";
 import { activateApp } from "../runtime/activate.js";
+import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/accessibility.js";
 import { listApps } from "../runtime/apps.js";
 import { checkPermissions } from "../runtime/permissions.js";
 import { captureScreen } from "../runtime/screen.js";
@@ -105,6 +106,10 @@ function registerTools(
         },
         async (args) => {
           const screenshot = args.include_screenshot === false ? undefined : await captureScreen();
+          const accessibility =
+            args.include_accessibility_tree === false
+              ? undefined
+              : await readAccessibilityTree({ max_depth: args.max_tree_depth });
           const artifact = screenshot
             ? artifactStore.saveFileArtifact({
                 session_id: args.session_id,
@@ -114,8 +119,10 @@ function registerTools(
                 mime_type: "image/png",
               })
             : undefined;
+          const elements = accessibility ? flattenAccessibilityNodes(accessibility.nodes) : [];
           const result = {
             session_id: args.session_id,
+            accessibility_tree_id: accessibility?.tree_id,
             screen: screenshot
               ? {
                   width: screenshot.width,
@@ -128,7 +135,7 @@ function registerTools(
                   screenshot_uri: artifact?.uri,
                 }
               : undefined,
-            elements: [],
+            elements,
           };
           sessionStore.recordStep(args.session_id, {
             tool: "observe",
