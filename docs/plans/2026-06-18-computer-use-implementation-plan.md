@@ -72,7 +72,7 @@ Before coding, implementers must read:
 
 - [x] Create session ids, step ids and status transitions.
 - [x] Add per-session element cache placeholder.
-- [ ] Ensure same session actions are serialized.
+- [x] Ensure same session actions are serialized.
 - [ ] Add timeout and cancel support.
 - [ ] Commit: `feat: add computer use sessions`
 

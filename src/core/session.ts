@@ -68,6 +68,7 @@ export class SessionStore {
   private readonly sessions = new Map<string, Session>();
   private readonly steps = new Map<string, Step[]>();
   private readonly elements = new Map<string, Map<string, RegisteredElement>>();
+  private readonly actionQueues = new Map<string, Promise<void>>();
 
   constructor(options: SessionStoreOptions = {}) {
     this.now = options.now ?? (() => new Date());
@@ -122,6 +123,31 @@ export class SessionStore {
     this.requireSession(sessionId);
     const element = this.elements.get(sessionId)?.get(elementId);
     return element ? cloneRegisteredElement(element) : undefined;
+  }
+
+  async runExclusive<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    this.requireActiveSession(sessionId);
+    const previous = this.actionQueues.get(sessionId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(async () => {
+        this.requireActiveSession(sessionId);
+        return operation();
+      });
+    const current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    this.actionQueues.set(sessionId, current);
+
+    try {
+      return await run;
+    } finally {
+      if (this.actionQueues.get(sessionId) === current) {
+        this.actionQueues.delete(sessionId);
+      }
+    }
   }
 
   recordStep(sessionId: string, input: RecordStepInput): Step {

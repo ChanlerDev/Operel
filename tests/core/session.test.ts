@@ -141,6 +141,58 @@ describe("SessionStore", () => {
     expect(closed.closed_at).toBe("2026-06-18T00:00:00.000Z");
   });
 
+  it("serializes operations within the same active session", async () => {
+    const store = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "queueid",
+    });
+    const session = store.startSession({ task: "Queue actions" });
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = store.runExclusive(session.session_id, async () => {
+      order.push("first:start");
+      markFirstStarted();
+      await firstCanFinish;
+      order.push("first:end");
+      return "first";
+    });
+    const second = store.runExclusive(session.session_id, async () => {
+      order.push("second:start");
+      return "second";
+    });
+
+    await firstStarted;
+    expect(order).toEqual(["first:start"]);
+
+    releaseFirst();
+    await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
+    expect(order).toEqual(["first:start", "first:end", "second:start"]);
+  });
+
+  it("continues queued session operations after a previous operation fails", async () => {
+    const store = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "queueid",
+    });
+    const session = store.startSession({ task: "Queue failures" });
+
+    await expect(
+      store.runExclusive(session.session_id, async () => {
+        throw new Error("operation failed");
+      }),
+    ).rejects.toThrow("operation failed");
+
+    await expect(store.runExclusive(session.session_id, async () => "recovered")).resolves.toBe("recovered");
+  });
+
   it("rejects steps for unknown or non-active sessions", () => {
     const store = new SessionStore({
       now: () => new Date("2026-06-18T00:00:00.000Z"),

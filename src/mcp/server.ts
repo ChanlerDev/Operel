@@ -656,17 +656,19 @@ async function withOptionalSessionStep(
     });
   }
 
-  const result = await run(sessionId);
-  const postObservation = options.postObserve
-    ? await capturePostActionObservation(sessionId, options.postObserve.artifactStore)
-    : undefined;
-  const resultWithSession = { ...result, session_id: sessionId, post_observation: postObservation };
-  sessionStore.recordStep(sessionId, {
-    tool,
-    input: args,
-    result: resultWithSession,
+  return sessionStore.runExclusive(sessionId, async () => {
+    const result = await run(sessionId);
+    const postObservation = options.postObserve
+      ? await capturePostActionObservation(sessionId, options.postObserve.artifactStore)
+      : undefined;
+    const resultWithSession = { ...result, session_id: sessionId, post_observation: postObservation };
+    sessionStore.recordStep(sessionId, {
+      tool,
+      input: args,
+      result: resultWithSession,
+    });
+    return formatStructuredResult(resultWithSession);
   });
-  return formatStructuredResult(resultWithSession);
 }
 
 async function capturePostActionObservation(sessionId: string, artifactStore: ArtifactStore) {
