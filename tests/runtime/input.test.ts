@@ -69,6 +69,20 @@ describe("OperelRuntime input", () => {
     }
   });
 
+  it("rejects sensitive text before using the pasteboard", async () => {
+    const client = new RuntimeClient({ command: helperPath });
+
+    try {
+      await expect(client.request("input.type_text", {
+        text: "secret",
+        strategy: "paste",
+        sensitive: true,
+      })).rejects.toThrow("sensitive text cannot use paste strategy.");
+    } finally {
+      await client.close();
+    }
+  });
+
   it("accepts a zero-distance scroll request", async () => {
     const client = new RuntimeClient({ command: helperPath });
 
@@ -100,11 +114,11 @@ describe("OperelRuntime input", () => {
     }
   });
 
-  it("falls back to coordinate click when AX target is not matched", async () => {
+  it("rejects AX-targeted clicks when the element is not matched", async () => {
     const client = new RuntimeClient({ command: helperPath });
 
     try {
-      const result = await client.request("input.click", {
+      await expect(client.request("input.click", {
         x: 0,
         y: 0,
         ax_role: "AXButton",
@@ -113,12 +127,7 @@ describe("OperelRuntime input", () => {
         ax_y: 0,
         ax_width: 10,
         ax_height: 10,
-      });
-
-      expect(result).toMatchObject({
-        performed: true,
-        strategy_used: "cg_event",
-      });
+      })).rejects.toThrow("AX target was not found; refusing coordinate fallback.");
     } finally {
       await client.close();
     }

@@ -35,6 +35,7 @@ prompt = ["Google Chrome"]
 规则：
 
 - deny 优先级最高。
+- app policy 同时匹配显示名称和 bundle id；默认 deny 包含 `System Settings` / `com.apple.SystemSettings` 与 `Keychain Access` / `com.apple.keychainaccess`。
 - 未列入时默认 prompt。
 - 允许 app 不等于允许所有动作；敏感动作仍需确认。
 
@@ -102,7 +103,9 @@ MVP action risk classifier:
 - `click` 的 `target` 或 selector label/value 含 delete、remove、erase、discard、reset、format、terminate、revoke、disable、destroy 等破坏性词时返回 `destructive_action`。
 - `click` 的 `target` 或 selector label/value 含 send、share、post、publish、email、pay、buy、purchase、checkout、transfer、submit 等外发/支付词时返回 `external_action`。
 - `press_key` 的 Delete/Backspace 类按键默认视为 `destructive_action`。
-- 坐标点击没有可靠语义，MVP 不基于坐标猜测风险；调用方应优先使用 `element_id`、`target` 或 selector。
+- 坐标点击没有可靠语义，默认返回 `coordinate_click` approval；调用方应优先使用 `element_id`、`target` 或 selector。
+- 带 AX target 的 click 找不到匹配元素时必须失败，不能静默回退到坐标点击。
+- `sensitive=true` 的 text input 不能使用 pasteboard；当前 runtime 直接拒绝，直到有不触碰剪贴板的安全输入策略。
 
 ## 日志脱敏
 
@@ -113,6 +116,8 @@ MVP action risk classifier:
 - 截图中的敏感区域，future。
 
 剪贴板内容默认按敏感数据处理：即使只是作为输入加速手段，也不应明文写入 audit。
+
+截图和完整 AX tree 默认存储在 `~/.operel/computer-use` 下的 artifact/export 中。MCP 公共返回只暴露 `operel://` URI 和必要摘要，不返回本地绝对路径、helper `runtime_handle` 或原始临时文件路径。
 
 日志必须区分：
 

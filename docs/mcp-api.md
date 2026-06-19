@@ -25,6 +25,15 @@ MCP 是 Operel 的稳定 Agent 入口。当前公共 tool surface 只包含：
 
 历史细粒度工具已经从公共 MCP surface 移除。底层 runtime primitive 仍存在于 Swift helper 和 TypeScript runtime adapter 中，但不作为 Agent contract 暴露。
 
+## Result Shape
+
+所有 tool result 同时使用 MCP `content` 和 `structuredContent`：
+
+- `content[0]` 是短文本摘要，只放给模型快速判断的结果，不重复塞入完整 JSON。
+- 当 `observe` 或 action post-observation 产生截图时，当前截图以 MCP `image` content 返回，mime type 为 `image/png`。
+- `structuredContent` 放机器可读字段，例如 `trace_id`、`observation_id`、`screen`、`elements`、`error`。
+- 本地绝对路径、helper 内部 handle、原始临时文件路径不属于公共 contract；截图、AX tree、audit、bundle 落在 `~/.operel/computer-use`，公共返回只暴露 `operel://` URI。
+
 ## State Model
 
 - `trace_id`: 自动创建的日志/audit/artifact 分组 id。每个 stable tool result 返回它；调用方只有在要合并到既有 trace 时才传入。
@@ -86,6 +95,8 @@ Output includes:
 - `accessibility_tree_uri`
 - `elements[]`
 
+`elements[]` 只包含稳定 agent 字段，例如 `element_id`、`tree_id`、role、label、value、enabled、frame、children。Swift helper 的 `runtime_handle` 不会从 MCP 返回。
+
 ### `act`
 
 执行一个 atomic UI intent。
@@ -119,6 +130,8 @@ Contract:
 - 一次只执行一个动作。
 - 所有动作统一经过 app policy、action risk policy、target resolution、serialization、artifact 和 audit。
 - 风险动作返回 `approval_required`，不执行。
+- 纯坐标点击没有可靠语义，默认返回 `approval_required`；优先使用 `element_id`、label/value selector 或重新 observe。
+- 带 AX target 的 runtime click 如果找不到元素，会返回 `target_not_found`，不会自动回退到坐标点击。
 - 动作后返回 `result.post_observation`，除非动作失败或无法观察。
 - 使用 `element_id` 时必须传入产生该 element 的 `session_id`；过期或未知 element 返回 `target_not_found` 并要求重新 observe。
 
@@ -156,7 +169,7 @@ Input:
 }
 ```
 
-When `session_id` is supplied, `log` exports a bundle with manifest and audit paths. Without `session_id`, it returns a lightweight session index.
+When `session_id` is supplied, `log` exports a bundle with manifest and audit URIs. Without `session_id`, it returns a lightweight session index.
 
 ## Resources
 

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
-import { ArtifactStore } from "../core/artifacts.js";
+import { ArtifactStore, type Artifact } from "../core/artifacts.js";
 import { PolicyEngine } from "../core/policy.js";
 import { SessionStore } from "../core/session.js";
 import { resolveClickTarget } from "../core/targets.js";
@@ -299,7 +300,7 @@ function registerTools(
               ? undefined
               : await readAccessibilityTree({ app, bundle_id: bundleId, max_depth: args.max_tree_depth });
           const artifact = screenshot
-            ? artifactStore.saveFileArtifact({
+            ? artifactStore.moveFileArtifact({
                 session_id: sessionId,
                 kind: "screenshot",
                 source_path: screenshot.tmp_path,
@@ -328,7 +329,6 @@ function registerTools(
             observation_id: observationId,
             accessibility_tree_id: accessibility?.tree_id,
             accessibility_tree_uri: accessibilityArtifact?.uri,
-            accessibility_tree_path: accessibilityArtifact?.path,
             screen: screenshot
               ? {
                   width: screenshot.width,
@@ -348,7 +348,7 @@ function registerTools(
             input: args,
             result,
           });
-          return formatStructuredResult(result);
+          return formatStructuredResult(result, artifact ? [imageContentFromArtifact(artifact)] : []);
         },
       );
       continue;
@@ -412,8 +412,7 @@ async function runStableAction(
       return { error: activationArgs.error };
     }
 
-    const appName = activationArgs.app ?? activationArgs.bundle_id ?? "";
-    const decision = policy.evaluateApp(appName);
+    const decision = policy.evaluateApp({ name: activationArgs.app, bundle_id: activationArgs.bundle_id });
     if (decision.decision === "denied") {
       return {
         error: {
@@ -526,7 +525,7 @@ async function runStableAction(
   const clickTarget = action.target?.label ?? action.target?.value;
   const decision = policy.evaluateAction({
     tool: "click",
-    target: clickTarget,
+    target: clickTarget ?? action.target?.element_id,
     selector: {
       label: action.target?.label,
       role: action.target?.role,
@@ -606,7 +605,7 @@ async function runStableAction(
       "act",
       async (actualSessionId) => {
         const screenshot = await captureScreen();
-        const artifact = artifactStore.saveFileArtifact({
+        const artifact = artifactStore.moveFileArtifact({
           session_id: actualSessionId,
           kind: "screenshot",
           source_path: screenshot.tmp_path,
@@ -616,7 +615,6 @@ async function runStableAction(
         return {
           ...(await click(clickInput)),
           screenshot_uri: artifact.uri,
-          screenshot_path: artifact.path,
           coordinate_space: screenshot.coordinate_space,
         };
       },
@@ -650,11 +648,13 @@ function exportSessionEvidence(
     };
   }
 
+  const exported = artifactStore.exportSession({
+    session,
+    steps: sessionStore.listSteps(sessionId),
+  });
+
   return {
-    result: artifactStore.exportSession({
-      session,
-      steps: sessionStore.listSteps(sessionId),
-    }),
+    result: publicStructuredContent(exported),
   };
 }
 
@@ -730,16 +730,90 @@ function registerResources(server: McpServer, sessionStore: SessionStore): void 
   );
 }
 
-function formatStructuredResult(structuredContent: Record<string, unknown>) {
+type McpContent =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image";
+      data: string;
+      mimeType: string;
+    };
+
+function formatStructuredResult(structuredContent: Record<string, unknown>, additionalContent: McpContent[] = []) {
+  const publicContent = publicStructuredContent(structuredContent);
   return {
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify(structuredContent, null, 2),
+        text: summarizeResult(publicContent),
       },
+      ...additionalContent,
     ],
-    structuredContent,
+    structuredContent: publicContent,
   };
+}
+
+function imageContentFromArtifact(artifact: Artifact): McpContent {
+  return {
+    type: "image",
+    data: readFileSync(artifact.path).toString("base64"),
+    mimeType: artifact.mime_type,
+  };
+}
+
+function publicStructuredContent(value: Record<string, unknown>): Record<string, unknown> {
+  return removeInternalFields(value) as Record<string, unknown>;
+}
+
+function removeInternalFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(removeInternalFields);
+  }
+
+  if (!isObject(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "runtime_handle" && !key.endsWith("_path"))
+      .map(([key, child]) => [key, removeInternalFields(child)]),
+  );
+}
+
+function summarizeResult(structuredContent: Record<string, unknown>): string {
+  if (isObject(structuredContent.error)) {
+    const code = typeof structuredContent.error.code === "string" ? structuredContent.error.code : "error";
+    const message = typeof structuredContent.error.message === "string" ? structuredContent.error.message : "";
+    return message ? `error: ${code}: ${message}` : `error: ${code}`;
+  }
+
+  if (typeof structuredContent.observation_id === "string") {
+    const elementCount = Array.isArray(structuredContent.elements) ? structuredContent.elements.length : 0;
+    const hasScreenshot = isObject(structuredContent.screen) && typeof structuredContent.screen.screenshot_uri === "string";
+    return `observe: ${elementCount} elements${hasScreenshot ? ", screenshot attached" : ""}`;
+  }
+
+  if (isObject(structuredContent.result)) {
+    const actionType = isObject(structuredContent.action) ? structuredContent.action.type : undefined;
+    return typeof actionType === "string" ? `act: ${actionType} completed` : "act: completed";
+  }
+
+  if (structuredContent.stopped === true) {
+    return "stop: completed";
+  }
+
+  if (typeof structuredContent.format === "string") {
+    return `log: ${structuredContent.format}`;
+  }
+
+  if (typeof structuredContent.ready === "boolean") {
+    return `status: ${structuredContent.ready ? "ready" : "not ready"}`;
+  }
+
+  return "ok";
 }
 
 async function resolveWindowActivationArgs(args: {
@@ -863,7 +937,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 
 async function capturePostActionObservation(sessionId: string, artifactStore: ArtifactStore) {
   const screenshot = await captureScreen();
-  const artifact = artifactStore.saveFileArtifact({
+  const artifact = artifactStore.moveFileArtifact({
     session_id: sessionId,
     kind: "screenshot",
     source_path: screenshot.tmp_path,

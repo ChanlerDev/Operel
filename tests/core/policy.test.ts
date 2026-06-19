@@ -18,6 +18,24 @@ describe("PolicyEngine", () => {
     });
   });
 
+  it("applies app policy to bundle identifiers and app names", () => {
+    const policy = new PolicyEngine({
+      apps: {
+        allowed: ["com.apple.TextEdit"],
+        denied: ["System Settings"],
+        prompt: [],
+      },
+    });
+
+    expect(policy.evaluateApp({ name: "TextEdit", bundle_id: "com.apple.TextEdit" })).toEqual({
+      decision: "allowed",
+    });
+    expect(policy.evaluateApp({ bundle_id: "com.apple.SystemSettings" })).toEqual({
+      decision: "denied",
+      reason: "app_denied",
+    });
+  });
+
   it("allows explicitly allowed apps", () => {
     const policy = new PolicyEngine({
       apps: {
@@ -35,7 +53,7 @@ describe("PolicyEngine", () => {
   it("requires prompt for unspecified apps", () => {
     const policy = new PolicyEngine();
 
-    expect(policy.evaluateApp("Preview")).toEqual({
+    expect(policy.evaluateApp({ name: "Preview", bundle_id: "com.apple.Preview" })).toEqual({
       decision: "prompt_required",
       reason: "app_not_preapproved",
     });
@@ -72,14 +90,15 @@ describe("PolicyEngine", () => {
     });
   });
 
-  it("allows ordinary click targets and coordinate-only clicks", () => {
+  it("allows ordinary click targets but requires approval for coordinate-only clicks", () => {
     const policy = new PolicyEngine();
 
     expect(policy.evaluateAction({ tool: "click", target: "Save" })).toEqual({
       decision: "allowed",
     });
     expect(policy.evaluateAction({ tool: "click" })).toEqual({
-      decision: "allowed",
+      decision: "approval_required",
+      reason: "coordinate_click",
     });
   });
 

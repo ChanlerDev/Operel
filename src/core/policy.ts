@@ -25,6 +25,13 @@ export type ActionPolicyInput = {
   modifiers?: string[];
 };
 
+export type AppPolicyTarget =
+  | string
+  | {
+      name?: string;
+      bundle_id?: string;
+    };
+
 export class PolicyEngine {
   private readonly allowed: Set<string>;
   private readonly denied: Set<string>;
@@ -36,16 +43,17 @@ export class PolicyEngine {
     this.prompt = new Set(config.apps?.prompt ?? []);
   }
 
-  evaluateApp(app: string): PolicyDecision {
-    if (this.denied.has(app)) {
+  evaluateApp(app: AppPolicyTarget): PolicyDecision {
+    const candidates = appPolicyCandidates(app);
+    if (candidates.some((candidate) => this.denied.has(candidate))) {
       return { decision: "denied", reason: "app_denied" };
     }
 
-    if (this.allowed.has(app)) {
+    if (candidates.some((candidate) => this.allowed.has(candidate))) {
       return { decision: "allowed" };
     }
 
-    if (this.prompt.has(app)) {
+    if (candidates.some((candidate) => this.prompt.has(candidate))) {
       return { decision: "prompt_required", reason: "app_requires_prompt" };
     }
 
@@ -59,6 +67,9 @@ export class PolicyEngine {
 
     if (input.tool === "click") {
       const targetText = [input.target, input.selector?.label, input.selector?.value].filter(isNonEmptyString).join(" ");
+      if (!targetText) {
+        return { decision: "approval_required", reason: "coordinate_click" };
+      }
       if (looksDestructive(targetText)) {
         return { decision: "approval_required", reason: "destructive_action" };
       }
@@ -72,6 +83,25 @@ export class PolicyEngine {
     }
 
     return { decision: "allowed" };
+  }
+}
+
+function appPolicyCandidates(target: AppPolicyTarget): string[] {
+  const raw =
+    typeof target === "string"
+      ? [target]
+      : [target.name, target.bundle_id, defaultNameForBundleId(target.bundle_id)].filter(isNonEmptyString);
+  return [...new Set(raw.map((item) => item.trim()).filter(Boolean))];
+}
+
+function defaultNameForBundleId(bundleId: string | undefined): string | undefined {
+  switch (bundleId) {
+    case "com.apple.SystemSettings":
+      return "System Settings";
+    case "com.apple.keychainaccess":
+      return "Keychain Access";
+    default:
+      return undefined;
   }
 }
 

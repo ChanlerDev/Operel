@@ -11,6 +11,10 @@ import { PolicyEngine } from "../../src/core/policy.js";
 import { SessionStore } from "../../src/core/session.js";
 import { createComputerUseServer } from "../../src/mcp/server.js";
 
+type TestContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
 async function connectTestClient(
   sessionStore = new SessionStore(),
   artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-mcp-artifacts-")) }),
@@ -112,7 +116,87 @@ describe("Computer Use MCP server", () => {
         },
         elements: expect.any(Array),
       });
-      expect(existsSync((result.structuredContent as { accessibility_tree_path: string }).accessibility_tree_path)).toBe(true);
+      expect(result.structuredContent).not.toHaveProperty("accessibility_tree_path");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps runtime handles and local artifact paths out of observe responses", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          include_screenshot: true,
+          include_accessibility_tree: true,
+          max_tree_depth: 2,
+        },
+      });
+
+      const encoded = JSON.stringify(result.structuredContent);
+      const content = result.content as TestContent[];
+      expect(encoded).not.toContain("runtime_handle");
+      expect(encoded).not.toContain("_path");
+      expect(content[0]).toEqual({
+        type: "text",
+        text: expect.stringMatching(/^observe: /),
+      });
+      expect((content[0] as { type: "text"; text: string }).text).not.toContain("\"elements\"");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns captured screenshots as MCP image content", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          include_screenshot: true,
+          include_accessibility_tree: false,
+        },
+      });
+
+      const content = result.content as TestContent[];
+      expect(content).toEqual([
+        {
+          type: "text",
+          text: expect.any(String),
+        },
+        {
+          type: "image",
+          data: expect.any(String),
+          mimeType: "image/png",
+        },
+      ]);
+      expect((content[1] as { type: "image"; data: string; mimeType: string }).data.length).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not return image content when screenshots are disabled", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          include_screenshot: false,
+          include_accessibility_tree: false,
+        },
+      });
+
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.any(String),
+        },
+      ]);
     } finally {
       await server.close();
     }
@@ -295,11 +379,10 @@ describe("Computer Use MCP server", () => {
         format: "bundle",
         session_id: session.session_id,
         uri: `operel://sessions/${session.session_id}/export`,
-        manifest_path: expect.any(String),
-        audit_path: expect.any(String),
+        manifest_uri: `operel://sessions/${session.session_id}/export/manifest`,
+        audit_uri: `operel://sessions/${session.session_id}/export/audit`,
       });
-      expect(existsSync((result.structuredContent as { manifest_path: string }).manifest_path)).toBe(true);
-      expect(existsSync((result.structuredContent as { audit_path: string }).audit_path)).toBe(true);
+      expect(JSON.stringify(result.structuredContent)).not.toContain("_path");
     } finally {
       await server.close();
     }

@@ -61,7 +61,7 @@ export function defaultConfigText(): string {
   return [
     "[apps]",
     'allowed = []',
-    'denied = ["System Settings", "Keychain Access"]',
+    'denied = ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"]',
     'prompt = []',
     "",
     "[policy]",
@@ -75,7 +75,7 @@ function defaultConfig(): OperelConfig {
   return {
     apps: {
       allowed: [],
-      denied: ["System Settings", "Keychain Access"],
+      denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
       prompt: [],
     },
     policy: {

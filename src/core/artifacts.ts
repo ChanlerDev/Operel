@@ -1,5 +1,5 @@
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { copyFileSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type { Session, Step } from "./session.js";
@@ -40,6 +40,8 @@ export type SessionExport = {
   export_path: string;
   manifest_path: string;
   audit_path: string;
+  manifest_uri: string;
+  audit_uri: string;
 };
 
 export type ArtifactStoreOptions = {
@@ -58,44 +60,53 @@ export class ArtifactStore {
   }
 
   saveFileArtifact(input: FileArtifactInput): Artifact {
-    const artifactId = `artifact_${this.id()}`;
-    const extension = input.extension.replace(/^\./, "");
-    const sessionDir = join(this.root, "sessions", input.session_id, "artifacts");
-    const path = join(sessionDir, `${artifactId}.${extension}`);
+    const sessionId = safeIdentifier(input.session_id, "session_id");
+    const artifactId = `artifact_${safeIdentifier(this.id(), "artifact_id")}`;
+    const extension = safeExtension(input.extension);
+    const sessionDir = join(this.root, "sessions", sessionId, "artifacts");
+    const path = safeJoin(sessionDir, `${artifactId}.${extension}`);
 
     mkdirSync(sessionDir, { recursive: true });
     copyFileSync(input.source_path, path);
 
     return {
       artifact_id: artifactId,
-      session_id: input.session_id,
+      session_id: sessionId,
       kind: input.kind,
-      uri: `operel://sessions/${input.session_id}/artifacts/${artifactId}`,
+      uri: `operel://sessions/${sessionId}/artifacts/${artifactId}`,
       path,
       mime_type: input.mime_type || mimeTypeForExtension(basename(path)),
     };
   }
 
+  moveFileArtifact(input: FileArtifactInput): Artifact {
+    const artifact = this.saveFileArtifact(input);
+    unlinkSync(input.source_path);
+    return artifact;
+  }
+
   saveJsonArtifact(input: JsonArtifactInput): Artifact {
-    const artifactId = `artifact_${this.id()}`;
-    const sessionDir = join(this.root, "sessions", input.session_id, "artifacts");
-    const path = join(sessionDir, `${artifactId}.json`);
+    const sessionId = safeIdentifier(input.session_id, "session_id");
+    const artifactId = `artifact_${safeIdentifier(this.id(), "artifact_id")}`;
+    const sessionDir = join(this.root, "sessions", sessionId, "artifacts");
+    const path = safeJoin(sessionDir, `${artifactId}.json`);
 
     mkdirSync(sessionDir, { recursive: true });
     writeFileSync(path, JSON.stringify(redactForExport(input.value), null, 2));
 
     return {
       artifact_id: artifactId,
-      session_id: input.session_id,
+      session_id: sessionId,
       kind: input.kind,
-      uri: `operel://sessions/${input.session_id}/artifacts/${artifactId}`,
+      uri: `operel://sessions/${sessionId}/artifacts/${artifactId}`,
       path,
       mime_type: "application/json",
     };
   }
 
   exportSession(input: SessionExportInput): SessionExport {
-    const exportPath = join(this.root, "sessions", input.session.session_id, "export");
+    const sessionId = safeIdentifier(input.session.session_id, "session_id");
+    const exportPath = safeJoin(join(this.root, "sessions", sessionId), "export");
     const manifestPath = join(exportPath, "manifest.json");
     const auditPath = join(exportPath, "audit.jsonl");
     const safeSession = redactForExport(input.session) as Session;
@@ -122,12 +133,38 @@ export class ArtifactStore {
 
     return {
       session_id: input.session.session_id,
-      uri: `operel://sessions/${input.session.session_id}/export`,
+      uri: `operel://sessions/${sessionId}/export`,
       export_path: exportPath,
       manifest_path: manifestPath,
       audit_path: auditPath,
+      manifest_uri: `operel://sessions/${sessionId}/export/manifest`,
+      audit_uri: `operel://sessions/${sessionId}/export/audit`,
     };
   }
+}
+
+function safeIdentifier(value: string, name: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error(`invalid ${name}`);
+  }
+  return value;
+}
+
+function safeExtension(value: string): string {
+  const extension = value.replace(/^\./, "");
+  if (!/^[A-Za-z0-9]+$/.test(extension)) {
+    throw new Error("invalid extension");
+  }
+  return extension;
+}
+
+function safeJoin(root: string, child: string): string {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(resolvedRoot, child);
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}/`)) {
+    throw new Error("invalid artifact path");
+  }
+  return resolvedPath;
 }
 
 function redactForExport(value: unknown, sensitiveContext = false): unknown {

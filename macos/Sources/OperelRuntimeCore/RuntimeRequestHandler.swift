@@ -810,6 +810,29 @@ private func typeTextResponse(request: RuntimeRequest) throws -> RuntimeResponse
             )
         )
     }
+    let strategy = request.params?.strategy ?? "paste"
+    if strategy != "paste" && strategy != "auto" {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "unsupported_operation",
+                message: "input.type_text only supports paste strategy."
+            )
+        )
+    }
+    if request.params?.sensitive == true {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "approval_required",
+                message: "sensitive text cannot use paste strategy."
+            )
+        )
+    }
 
     let pasteboard = NSPasteboard.general
     let previousItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
@@ -880,6 +903,17 @@ private func clickResponse(request: RuntimeRequest) throws -> RuntimeResponse {
                 "strategy_used": .string("ax_press")
             ]),
             error: nil
+        )
+    }
+    if hasAXTarget(request: request) {
+        return RuntimeResponse(
+            jsonrpc: "2.0",
+            id: request.id,
+            result: nil,
+            error: RuntimeError(
+                code: "target_not_found",
+                message: "AX target was not found; refusing coordinate fallback."
+            )
         )
     }
 

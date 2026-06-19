@@ -41,7 +41,7 @@ redact_sensitive_text_in_logs = true
     expect(loadConfig("/missing/config.toml")).toEqual({
       apps: {
         allowed: [],
-        denied: ["System Settings", "Keychain Access"],
+        denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
         prompt: [],
       },
       policy: {
@@ -65,7 +65,7 @@ redact_sensitive_text_in_logs = true
     expect(loadConfig(path)).toEqual({
       apps: {
         allowed: [],
-        denied: ["System Settings", "Keychain Access"],
+        denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
         prompt: [],
       },
       policy: {
