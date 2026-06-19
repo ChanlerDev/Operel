@@ -239,26 +239,14 @@ function registerTools(
         async (args) => {
           const traceId = args.trace_id ?? createTraceId();
           if (args.session_id) {
-            const session = sessionStore.getSession(args.session_id);
-            if (!session) {
-              return formatStructuredResult({
-                trace_id: traceId,
-                error: {
-                  code: "session_expired",
-                  message: `Unknown session: ${args.session_id}`,
-                  recoverable: false,
-                },
-              });
+            const exported = exportSessionEvidence(sessionStore, artifactStore, args.session_id);
+            if ("error" in exported) {
+              return formatStructuredResult({ trace_id: traceId, error: exported.error });
             }
-
-            const exported = artifactStore.exportSession({
-              session,
-              steps: sessionStore.listSteps(args.session_id),
-            });
             return formatStructuredResult({
               trace_id: traceId,
               format: args.format,
-              ...exported,
+              ...exported.result,
             });
           }
 
@@ -544,36 +532,23 @@ function registerTools(
             window_title: z.string().optional(),
           },
         },
-        async (args) => {
-          const activationArgs = name === "activate_window" ? await resolveWindowActivationArgs(args) : args;
-          if ("error" in activationArgs) {
-            return formatStructuredResult({ error: activationArgs.error });
-          }
-          const appName = activationArgs.app ?? activationArgs.bundle_id ?? "";
-          const decision = policy.evaluateApp(appName);
-          if (decision.decision === "denied") {
-            return formatStructuredResult({
-              error: {
-                code: decision.reason,
-                message: "App is denied by policy.",
-                recoverable: false,
+        async (args) =>
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              {
+                type: name === "activate_window" ? "focus" : "open_app",
+                app: args.app,
+                bundle_id: args.bundle_id,
+                window_id: args.window_id,
+                window_title: args.window_title,
               },
-            });
-          }
-          if (decision.decision === "prompt_required") {
-            return formatStructuredResult({
-              error: {
-                code: "approval_required",
-                message: "App requires approval before activation.",
-                recoverable: true,
-              },
-            });
-          }
-          return withOptionalSessionStep(sessionStore, args, name, async () => ({
-            ...(await activateApp(activationArgs)),
-            active_window_id: activationArgs.window_id ?? "",
-          }));
-        },
+              { toolName: name, legacyApprovalShape: true },
+            ),
+          ),
       );
       continue;
     }
@@ -587,9 +562,16 @@ function registerTools(
           inputSchema: z.object({}).passthrough(),
         },
         async (args) =>
-          withOptionalSessionStep(sessionStore, args, name, () => releaseModifiers(), {
-            postObserve: { artifactStore },
-          }),
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              typeof args.session_id === "string" ? args.session_id : undefined,
+              { type: "recover" },
+              { toolName: name },
+            ),
+          ),
       );
       continue;
     }
@@ -606,15 +588,17 @@ function registerTools(
             modifiers: z.array(z.string()).optional(),
           },
         },
-        async (args) => {
-          const decision = policy.evaluateAction({ tool: "press_key", key: args.key, modifiers: args.modifiers });
-          if (decision.decision === "approval_required") {
-            return formatApprovalRequired(decision.reason);
-          }
-          return withOptionalSessionStep(sessionStore, args, name, () => pressKey(args), {
-            postObserve: { artifactStore },
-          });
-        },
+        async (args) =>
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              { type: "press_key", key: args.key, modifiers: args.modifiers },
+              { toolName: name },
+            ),
+          ),
       );
       continue;
     }
@@ -631,18 +615,17 @@ function registerTools(
             sensitive: z.boolean().optional(),
           },
         },
-        async (args) => {
-          const decision = policy.evaluateAction({ tool: "type_text", text: args.text });
-          if (args.sensitive || decision.decision === "approval_required") {
-            return formatApprovalRequired(decision.reason ?? "sensitive_text");
-          }
-          return withOptionalSessionStep(sessionStore, args, name, () =>
-            typeText({ text: args.text, strategy: "paste" }),
-            {
-              postObserve: { artifactStore },
-            },
-          );
-        },
+        async (args) =>
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              { type: "type_text", text: args.text, sensitive: args.sensitive },
+              { toolName: name },
+            ),
+          ),
       );
       continue;
     }
@@ -662,9 +645,22 @@ function registerTools(
           },
         },
         async (args) =>
-          withOptionalSessionStep(sessionStore, args, name, () => scroll(args), {
-            postObserve: { artifactStore },
-          }),
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              {
+                type: "scroll",
+                x: args.x,
+                y: args.y,
+                delta_x: args.delta_x,
+                delta_y: args.delta_y,
+              },
+              { toolName: name },
+            ),
+          ),
       );
       continue;
     }
@@ -694,89 +690,30 @@ function registerTools(
             click_count: z.number().optional(),
           },
         },
-        async (args) => {
-          try {
-            const decision = policy.evaluateAction({
-              tool: "click",
-              target: args.target,
-              selector: args.selector,
-            });
-            if (decision.decision === "approval_required") {
-              return formatApprovalRequired(decision.reason);
-            }
-            let clickInput: Record<string, unknown> = args;
-            if (args.element_id) {
-              if (!args.session_id) {
-                return formatStructuredResult({
-                  error: {
-                    code: "session_expired",
-                    message: "element_id clicks require session_id.",
-                    recoverable: false,
-                  },
-                });
-              }
-              const element = sessionStore.getElement(args.session_id, args.element_id);
-              if (!element) {
-                return formatStructuredResult({
-                  error: {
-                    code: "target_not_found",
-                    message: "Unknown or expired element_id.",
-                    recoverable: true,
-                  },
-                });
-              }
-              clickInput = {
-                ...args,
-                x: Math.round(element.frame.x + element.frame.width / 2),
-                y: Math.round(element.frame.y + element.frame.height / 2),
-                app: args.app ?? sessionStore.getSession(args.session_id)?.app,
-                ax_role: element.role,
-                ax_label: element.label,
-                ax_value: element.value,
-                ax_x: element.frame.x,
-                ax_y: element.frame.y,
-                ax_width: element.frame.width,
-                ax_height: element.frame.height,
-              };
-            } else if ((args.target || args.selector) && (args.x === undefined || args.y === undefined)) {
-              const accessibility = await readAccessibilityTree({ app: args.app, bundle_id: args.bundle_id });
-              const resolution = resolveClickTarget(
-                { target: args.target, selector: args.selector },
-                flattenAccessibilityNodes(accessibility.nodes),
-              );
-              if (!resolution.ok) {
-                return formatStructuredResult({ error: resolution.error });
-              }
-              clickInput = { ...args, ...resolution.click };
-            }
-            return await withOptionalSessionStep(sessionStore, args, name, async (sessionId) => {
-              const screenshot = await captureScreen();
-              const artifact = artifactStore.saveFileArtifact({
-                session_id: sessionId,
-                kind: "screenshot",
-                source_path: screenshot.tmp_path,
-                extension: "png",
-                mime_type: "image/png",
-              });
-              return {
-                ...(await click(clickInput)),
-                screenshot_uri: artifact.uri,
-                screenshot_path: artifact.path,
-                coordinate_space: screenshot.coordinate_space,
-              };
-            }, {
-              postObserve: { artifactStore },
-            });
-          } catch (error) {
-            return formatStructuredResult({
-              error: {
-                code: "action_failed",
-                message: error instanceof Error ? error.message : String(error),
-                recoverable: true,
+        async (args) =>
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              {
+                type: "click",
+                target: args.element_id
+                  ? { element_id: args.element_id }
+                  : args.selector
+                    ? args.selector
+                    : args.target
+                      ? { label: args.target }
+                      : undefined,
+                app: args.app,
+                bundle_id: args.bundle_id,
+                x: args.x,
+                y: args.y,
               },
-            });
-          }
-        },
+              { toolName: name, legacyElementErrors: true },
+            ),
+          ),
       );
       continue;
     }
@@ -791,24 +728,7 @@ function registerTools(
             session_id: z.string(),
           },
         },
-        async (args) => {
-          const session = sessionStore.getSession(args.session_id);
-          if (!session) {
-            return formatStructuredResult({
-              error: {
-                code: "session_expired",
-                message: `Unknown session: ${args.session_id}`,
-                recoverable: false,
-              },
-            });
-          }
-          return formatStructuredResult(
-            artifactStore.exportSession({
-              session,
-              steps: sessionStore.listSteps(args.session_id),
-            }),
-          );
-        },
+        async (args) => formatLegacyExportResult(exportSessionEvidence(sessionStore, artifactStore, args.session_id)),
       );
       continue;
     }
@@ -825,20 +745,17 @@ function registerTools(
             timeout_ms: z.number().min(1).max(30000).optional(),
           },
         },
-        async (args) => {
-          return withOptionalSessionStep(sessionStore, args, name, async (sessionId, signal) => {
-            const waitedMs = Math.round((args.seconds ?? 1) * 1000);
-            const timeoutMs = args.timeout_ms;
-            if (timeoutMs !== undefined && timeoutMs < waitedMs) {
-              await delay(timeoutMs, signal);
-              throw new Error(`action timed out after ${timeoutMs}ms`);
-            }
-            if (waitedMs > 0) {
-              await delay(waitedMs, signal);
-            }
-            return { waited_ms: waitedMs };
-          });
-        },
+        async (args) =>
+          formatLegacyActionResult(
+            await runStableAction(
+              sessionStore,
+              artifactStore,
+              policy,
+              args.session_id,
+              { type: "wait", seconds: args.seconds, timeout_ms: args.timeout_ms },
+              { toolName: name },
+            ),
+          ),
       );
       continue;
     }
@@ -871,13 +788,23 @@ type StableAction = {
   timeout_ms?: number;
 };
 
+type ActionRunResult =
+  | { result: Record<string, unknown> }
+  | { error: Record<string, unknown>; metadata?: Record<string, unknown> };
+
 async function runStableAction(
   sessionStore: SessionStore,
   artifactStore: ArtifactStore,
   policy: PolicyEngine,
   sessionId: string | undefined,
   action: StableAction,
-): Promise<{ result: Record<string, unknown> } | { error: Record<string, unknown> }> {
+  options: {
+    toolName?: string;
+    legacyApprovalShape?: boolean;
+    legacyElementErrors?: boolean;
+  } = {},
+): Promise<ActionRunResult> {
+  const toolName = options.toolName ?? "act";
   if (action.type === "open_app" || action.type === "focus") {
     const activationArgs =
       action.type === "focus"
@@ -912,7 +839,7 @@ async function runStableAction(
       return {
         error: {
           code: "approval_required",
-          reason: decision.reason,
+          ...(options.legacyApprovalShape ? {} : { reason: decision.reason }),
           message: "App requires approval before activation.",
           recoverable: true,
         },
@@ -920,7 +847,7 @@ async function runStableAction(
     }
 
     return extractStructuredResult(
-      await withOptionalSessionStep(sessionStore, { session_id: sessionId, ...activationArgs }, "act", async () => ({
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId, ...activationArgs }, toolName, async () => ({
         ...(await activateApp(activationArgs)),
         active_window_id: activationArgs.window_id ?? "",
       })),
@@ -937,7 +864,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, text: action.text, sensitive: action.sensitive },
-        "act",
+        toolName,
         () => typeText({ text: action.text ?? "", strategy: "paste" }),
         { postObserve: { artifactStore } },
       ),
@@ -954,7 +881,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, key: action.key, modifiers: action.modifiers },
-        "act",
+        toolName,
         () => pressKey({ key: action.key ?? "", modifiers: action.modifiers }),
         { postObserve: { artifactStore } },
       ),
@@ -972,7 +899,7 @@ async function runStableAction(
           delta_x: action.delta_x,
           delta_y: action.delta_y,
         },
-        "act",
+        toolName,
         () => scroll(action),
         { postObserve: { artifactStore } },
       ),
@@ -981,7 +908,7 @@ async function runStableAction(
 
   if (action.type === "recover") {
     return extractStructuredResult(
-      await withOptionalSessionStep(sessionStore, { session_id: sessionId }, "act", () => releaseModifiers(), {
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId }, toolName, () => releaseModifiers(), {
         postObserve: { artifactStore },
       }),
     );
@@ -992,7 +919,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, seconds: action.seconds, timeout_ms: action.timeout_ms },
-        "act",
+        toolName,
         async (_sessionId, signal) => {
           const waitedMs = Math.round((action.seconds ?? 1) * 1000);
           if (action.timeout_ms !== undefined && action.timeout_ms < waitedMs) {
@@ -1044,8 +971,10 @@ async function runStableAction(
       return {
         error: {
           code: "target_not_found",
-          message: "element_id actions require the session_id returned by observe.",
-          recoverable: true,
+          message: options.legacyElementErrors
+            ? "element_id clicks require session_id."
+            : "element_id actions require the session_id returned by observe.",
+          recoverable: !options.legacyElementErrors,
         },
       };
     }
@@ -1054,7 +983,9 @@ async function runStableAction(
       return {
         error: {
           code: "target_not_found",
-          message: "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
+          message: options.legacyElementErrors
+            ? "Unknown or expired element_id."
+            : "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
           recoverable: true,
         },
       };
@@ -1088,7 +1019,7 @@ async function runStableAction(
     await withOptionalSessionStep(
       sessionStore,
       { session_id: sessionId, ...clickInput },
-      "act",
+      toolName,
       async (actualSessionId) => {
         const screenshot = await captureScreen();
         const artifact = artifactStore.saveFileArtifact({
@@ -1112,11 +1043,53 @@ async function runStableAction(
 
 function extractStructuredResult(result: {
   structuredContent: Record<string, unknown>;
-}): { result: Record<string, unknown> } | { error: Record<string, unknown> } {
+}): ActionRunResult {
   if (isObject(result.structuredContent.error)) {
-    return { error: result.structuredContent.error };
+    const { error, ...metadata } = result.structuredContent;
+    return {
+      error,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    };
   }
   return { result: result.structuredContent };
+}
+
+function formatLegacyActionResult(result: ActionRunResult) {
+  if ("error" in result) {
+    return formatStructuredResult({ error: result.error, ...(result.metadata ?? {}) });
+  }
+  return formatStructuredResult(result.result);
+}
+
+function exportSessionEvidence(
+  sessionStore: SessionStore,
+  artifactStore: ArtifactStore,
+  sessionId: string,
+): { result: Record<string, unknown> } | { error: Record<string, unknown> } {
+  const session = sessionStore.getSession(sessionId);
+  if (!session) {
+    return {
+      error: {
+        code: "session_expired",
+        message: `Unknown session: ${sessionId}`,
+        recoverable: false,
+      },
+    };
+  }
+
+  return {
+    result: artifactStore.exportSession({
+      session,
+      steps: sessionStore.listSteps(sessionId),
+    }),
+  };
+}
+
+function formatLegacyExportResult(result: { result: Record<string, unknown> } | { error: Record<string, unknown> }) {
+  if ("error" in result) {
+    return formatStructuredResult({ error: result.error });
+  }
+  return formatStructuredResult(result.result);
 }
 
 function approvalRequiredError(reason: string): Record<string, unknown> {
