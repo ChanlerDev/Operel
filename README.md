@@ -6,7 +6,7 @@ Mac-first Computer Use runtime for AI agents. Operel exposes a stable MCP server
 
 The MVP implementation is complete and verified on macOS with granted Screen Recording and Accessibility permissions.
 
-Implemented:
+Implemented today:
 
 - MCP server entrypoint: `operel-computer-use mcp`
 - CLI diagnostics: `operel-computer-use doctor`
@@ -16,6 +16,24 @@ Implemented:
 - Session engine: session lifecycle, element ids, serialized actions, cancel, timeouts, audit/export
 - Safety: app policy, sensitive/destructive/external action classification, redacted audit/artifacts
 - Smoke gates: signed doctor, TextEdit GUI smoke, MCP agent smoke
+
+Current API shape:
+
+- The implemented MCP server currently exposes fine-grained runtime tools such as `start_session`, `list_apps`, `observe`, `click`, `type_text`, `press_key`, `scroll`, `recover`, and `export_session`.
+- Those tools are functional, but they expose too many internal primitives for a general Computer Use product.
+- The target stable agent-facing surface is now five tools: `status`, `observe`, `act`, `stop`, and `log`.
+- `session_id` is no longer the preferred happy-path API. Logs and artifacts should be grouped by an automatic `trace_id`; element ids should be scoped by `observation_id`; a public `session_id` only makes sense when it represents an explicit desktop-control lease.
+- See [ADR-0005](./docs/decisions/ADR-0005-minimal-agent-facing-mcp-surface.md) and [MCP API](./docs/mcp-api.md). The current fine-grained tools should be treated as compatibility/debug surface during migration.
+
+Target MCP entrypoints:
+
+```text
+status  -> check readiness, permissions, active target, policy, current trace
+observe -> capture screenshot, accessibility elements, active app/window, observation_id
+act     -> execute one atomic UI intent through one policy/audit boundary
+stop    -> cancel active work, release modifiers, restore safe runtime state
+log     -> read or export trace logs, screenshots, artifacts, and audit events
+```
 
 ## Tech Stack
 

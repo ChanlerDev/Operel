@@ -22,7 +22,7 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 - [安全与权限](./security-permissions.md)：TCC 权限、app policy、敏感动作、人类确认和审计。
 - [测试策略](./testing-strategy.md)：单元、契约、fixture、真机 smoke 和回归测试。
 - [实现计划](./plans/2026-06-18-computer-use-implementation-plan.md)：MVP 的工程拆解、验收门槛和任务顺序。
-- [架构决策](./decisions/ADR-0001-mac-first.md)：Mac 优先、MCP 入口、视觉加 Accessibility、并发边界的关键 ADR。
+- [架构决策](./decisions/ADR-0001-mac-first.md)：Mac 优先、MCP 入口、视觉加 Accessibility、并发边界和精简 MCP surface 的关键 ADR。
 - [参考资料](./references.md)：本设计使用的公开资料和需要持续跟踪的上游。
 
 ## 当前实现
@@ -35,6 +35,8 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 4. 一个 session/action 日志层，支持 element ids、串行动作、cancel、timeout、artifact 保存和 audit export。
 5. 一个安全层，默认 app 级 allow/deny，敏感/破坏性/外发风险动作返回 approval，不默认执行。
 6. 两个 MCP client 安装入口：`install codex` 和 `install claude`。
+
+设计重审后，长期稳定 MCP surface 不应继续扩张细粒度工具；目标是收敛到 `status`、`observe`、`act`、`stop`、`log`。当前细粒度工具保留为兼容/调试层。见 [ADR-0005](./decisions/ADR-0005-minimal-agent-facing-mcp-surface.md)。
 
 真实验证路径见 [Release Notes](./release-notes.md)。
 

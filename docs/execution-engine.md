@@ -13,9 +13,17 @@ Computer Use 的基本循环是：
 
 Operel 不内置强绑定的模型 loop。它向 Agent 暴露高质量 observation 和动作工具，让上层 Agent 决策。未来可以增加 `run_task` 高阶工具，但不应在 MVP 中替代基础工具。
 
-## Session
+## Trace, Observation And Session
 
-Session state:
+Agent-facing workflow should not require a public `session_id` for every call. The app can log directly.
+
+Preferred state model:
+
+- `trace_id`: 自动创建的日志/audit/artifact 分组 id。每个 tool result 返回它；调用方只有在要合并日志时才传入。
+- `observation_id`: 每次 observe 生成。`element_id` 绑定到 observation，过期后要求重新 observe。
+- `session_id`: 仅当产品需要显式桌面控制租约时公开，例如锁定 app/window、用户可见所有权、超时和取消。
+
+Internal session/lease state, if exposed:
 
 ```json
 {
@@ -30,7 +38,7 @@ Session state:
 }
 ```
 
-Session status:
+Lease status:
 
 - `active`
 - `waiting_for_approval`

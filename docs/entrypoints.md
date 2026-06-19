@@ -82,33 +82,41 @@ operel-computer-use install claude --config-path /tmp/settings.json --command /a
 
 ### 低风险观察任务
 
-1. `start_session({ "task": "Inspect TextEdit window", "app": "TextEdit" })`
-2. `list_apps({})`
-3. `open_app({ "app": "TextEdit" })`
-4. `observe({ "session_id": "sess_...", "app": "TextEdit" })`
-5. Agent 根据 screenshot URI 和 elements 判断状态。
-6. 任务完成时调用 `close_session({ "session_id": "sess_...", "reason": "completed" })`；需要中断时调用 `cancel_session({ "session_id": "sess_..." })`。
+1. `status({})` 检查权限、active app/window、policy 和当前 `trace_id`。
+2. `observe({ "target": { "app": "TextEdit" } })`
+3. Agent 根据 screenshot URI、`observation_id` 和 elements 判断状态。
+4. 需要导出调试包时调用 `log({ "trace_id": "trace_...", "format": "bundle" })`。
 
 ### 输入文本任务
 
-1. `start_session`
-2. `open_app`
-3. `observe`
-4. `click({ "element_id": "el_..." })`
-5. `type_text({ "text": "hello from operel" })`
+1. `status`
+2. `act({ "action": { "type": "open_app", "app": "TextEdit" } })`
+3. `observe({ "target": { "app": "TextEdit" } })`
+4. `act({ "action": { "type": "click", "target": { "element_id": "el_..." } } })`
+5. `act({ "action": { "type": "type_text", "text": "hello from operel" } })`
 6. `observe`
-7. `export_session`
-8. `close_session`，或在需要中断时调用 `cancel_session`
+7. `log({ "format": "summary" })`
 
 ### 风险动作任务
 
-1. Agent 调用 `type_text` 或 `click` 前，core policy 判断动作风险。
-2. 如果风险高，tool 返回 `approval_required`，不执行动作。
+1. Agent 调用 `act`。
+2. core policy 判断动作风险。
+3. 如果风险高，tool 返回 `approval_required`，不执行动作。
 3. Agent 向用户解释动作影响。
-4. 用户确认后，Agent 调用 `request_approval` 或重新调用带 approval token 的动作。
+4. 用户确认后，Agent 重新调用带 approval token 的动作或交给 host approval UI。
 5. Core 记录 approval event，再执行动作。
 
 首版可以只实现“返回 `approval_required`，由上层 Agent 重新发起确认后继续”的简化流程，但不能默认执行风险动作。
+
+### 停止/恢复任务
+
+如果动作卡住、焦点不可信或用户要求停止：
+
+```json
+stop({ "trace_id": "trace_..." })
+```
+
+`stop` 负责取消当前动作、释放 modifier、恢复 Operel 修改过的剪贴板并写入 audit。
 
 ## CLI 入口
 

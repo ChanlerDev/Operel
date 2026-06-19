@@ -17,14 +17,125 @@ MCP client 配置：
 
 MCP 是首选入口，因为它让不同 Agent 用同一套 tools/resources/prompts 接入桌面能力。协议本身把 server 暴露为 tools、resources 和 prompts；Computer Use 的设计应把可执行动作放在 tools，把截图和日志等可读取状态放在 resources。按 2025-06-18 MCP 规范，工具结果应优先提供 `structuredContent`，同时用 text content 保持兼容；大截图和日志通过 `resource_link` 或 `resources/read` 获取。
 
+## 设计修正：少量 Agent-facing tools
+
+当前实现已经能工作，但原始 MCP surface 暴露了过多内部原语。更合理的稳定产品面应收敛到少量 intent-level tools：
+
+| Stable tool | Replaces | Why |
+| --- | --- | --- |
+| `status` | `permission_check`, most `list_apps`, most `list_windows` | Agent 需要知道“现在能不能操作、当前目标是什么”，不是分别调用多个诊断/枚举工具。 |
+| `observe` | `observe`, app/window state reads | 保留为核心工具；返回 screenshot、elements、active app/window、observation id 和 warnings。 |
+| `act` | `open_app`, `activate_window`, `click`, `type_text`, `press_key`, `scroll`, `wait`, `recover` | 单个 atomic action 入口比一组 OS primitive 更适合 Agent 规划，也方便统一 policy、pre/post observe、retry 和 audit。 |
+| `stop` | `cancel_session`, most manual `recover` | 安全停止、释放 modifier、取消当前动作。 |
+| `log` | `export_session`, session resources | 读取或导出 trace/audit/artifacts。 |
+
+Legacy fine-grained tools can remain during migration, but they should be treated as compatibility/debug surface, not the preferred product contract.
+
+### Session ID 重新定义
+
+Public `session_id` 不应是 happy-path 必填心智负担。如果只是为了日志，server 直接记录即可。
+
+Recommended model:
+
+- server 自动创建 `trace_id`，每个结果都返回它。
+- 调用方只有在需要合并到既有 trace 时才传 `trace_id`。
+- `observe` 返回 `observation_id`；`element_id` 的有效期绑定到 observation，而不是要求 Agent 管理 session。
+- 真正公开 `session_id` 只有在它代表“桌面控制租约”时才有意义：锁定 app/window、policy snapshot、timeout、cancel 和用户可见所有权。
+
+See [ADR-0005](./decisions/ADR-0005-minimal-agent-facing-mcp-surface.md).
+
 ## 命名约定
 
 - tool 使用动词短语：`start_session`、`observe`、`click`。
 - 参数使用 snake_case。
 - app 名称接受 human-readable name，但返回值必须包含稳定的 `app_id`。
-- 所有动作工具都接受可选 `session_id`。缺省时创建或复用默认 session，但返回中必须明确实际 session。
+- 新稳定工具使用 `status`、`observe`、`act`、`stop`、`log`。
+- 旧动作工具接受可选 `session_id`，但这是兼容层，不是推荐 Agent workflow。
 
-## Tools
+## Target Stable Tools
+
+### `status`
+
+返回当前 runtime 是否可用、权限、签名、policy 摘要、active app/window 和当前 trace。
+
+Output includes:
+
+- `trace_id`
+- `ready`
+- `permissions`
+- `code_signing`
+- `active_app`
+- `active_window`
+- `policy`
+- `warnings[]`
+- `next_steps[]`
+
+### `observe`
+
+获取当前桌面/app/window状态。返回 screenshot artifact、normalized elements、active target、`observation_id` 和 `trace_id`。
+
+Input should stay small:
+
+```json
+{
+  "trace_id": "trace_...",
+  "target": {
+    "app": "TextEdit",
+    "window_id": "win_..."
+  },
+  "screenshot": {
+    "scope": "display | app | window | rect"
+  }
+}
+```
+
+### `act`
+
+执行一个 atomic UI intent。
+
+```json
+{
+  "trace_id": "trace_...",
+  "action": {
+    "type": "click | type_text | press_key | scroll | open_app | focus | wait | recover",
+    "target": {
+      "element_id": "el_...",
+      "label": "Save"
+    },
+    "text": "hello",
+    "sensitive": false
+  }
+}
+```
+
+Contract:
+
+- 一次只执行一个动作。
+- 内部统一做 policy、target resolution、pre/post observation、artifact 和 audit。
+- 风险动作返回 `approval_required`，不执行。
+- 动作后返回 `post_observation` 或明确说明无法观察。
+
+### `stop`
+
+取消当前动作并进入安全状态：
+
+- abort active action。
+- release modifiers。
+- restore clipboard if Operel changed it。
+- append audit event。
+
+### `log`
+
+读取或导出 trace：
+
+```json
+{
+  "trace_id": "trace_...",
+  "format": "summary | jsonl | bundle"
+}
+```
+
+## Legacy Compatibility Tools
 
 ### `start_session`
 
