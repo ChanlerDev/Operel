@@ -87,7 +87,7 @@ operel-computer-use call stop --args '{"session_id":"..."}'
 ```bash
 operel-computer-use --help
 operel-computer-use doctor --json
-operel-computer-use call permission_check
+operel-computer-use call status
 operel-computer-use mcp
 ```
 

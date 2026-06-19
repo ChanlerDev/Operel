@@ -5,7 +5,7 @@ import * as z from "zod/v4";
 
 import { ArtifactStore } from "../core/artifacts.js";
 import { PolicyEngine } from "../core/policy.js";
-import { type CloseSessionReason, SessionStore } from "../core/session.js";
+import { SessionStore } from "../core/session.js";
 import { resolveClickTarget } from "../core/targets.js";
 import { activateApp } from "../runtime/activate.js";
 import { flattenAccessibilityNodes, readAccessibilityTree } from "../runtime/accessibility.js";
@@ -14,27 +14,12 @@ import { checkPermissions } from "../runtime/permissions.js";
 import { captureScreen } from "../runtime/screen.js";
 import { click, pressKey, releaseModifiers, scroll, typeText } from "../runtime/input.js";
 
-const mvpToolNames = [
+const stableToolNames = [
   "status",
   "act",
   "stop",
   "log",
-  "start_session",
-  "list_apps",
-  "list_windows",
   "observe",
-  "close_session",
-  "cancel_session",
-  "click",
-  "type_text",
-  "press_key",
-  "scroll",
-  "wait",
-  "open_app",
-  "activate_window",
-  "recover",
-  "export_session",
-  "permission_check",
 ] as const;
 
 export type ComputerUseServerOptions = {
@@ -65,7 +50,7 @@ function registerTools(
   artifactStore: ArtifactStore,
   policy: PolicyEngine,
 ): void {
-  for (const name of mvpToolNames) {
+  for (const name of stableToolNames) {
     if (name === "status") {
       server.registerTool(
         name,
@@ -260,99 +245,6 @@ function registerTools(
       continue;
     }
 
-    if (name === "start_session") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            task: z.string(),
-            app: z.string().optional(),
-            window_title: z.string().optional(),
-            risk_profile: z.enum(["low", "normal", "high"]).optional(),
-          },
-        },
-        async (args) => formatStructuredResult(sessionStore.startSession(args)),
-      );
-      continue;
-    }
-
-    if (name === "close_session") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string(),
-            reason: z.enum(["completed", "cancelled", "expired", "blocked"]).default("completed"),
-          },
-        },
-        async (args) =>
-          formatStructuredResult(
-            sessionStore.closeSession(args.session_id, args.reason as CloseSessionReason),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "cancel_session") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string(),
-          },
-        },
-        async (args) => {
-          const session = sessionStore.getSession(args.session_id);
-          if (!session) {
-            return formatStructuredResult({
-              error: {
-                code: "session_expired",
-                message: `Unknown session: ${args.session_id}`,
-                recoverable: false,
-              },
-            });
-          }
-          if (session.status !== "active") {
-            return formatStructuredResult({
-              session_id: args.session_id,
-              status: session.status,
-              already_closed: true,
-            });
-          }
-
-          sessionStore.abortActiveOperations(args.session_id);
-
-          let recovery: Record<string, unknown>;
-          try {
-            recovery = await releaseModifiers();
-          } catch (error) {
-            recovery = {
-              performed: false,
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
-
-          sessionStore.recordStep(args.session_id, {
-            tool: "cancel_session",
-            input: args,
-            result: { recovery },
-          });
-          const cancelled = sessionStore.closeSession(args.session_id, "cancelled");
-          return formatStructuredResult({
-            ...cancelled,
-            recovery,
-          });
-        },
-      );
-      continue;
-    }
-
     if (name === "observe") {
       server.registerTool(
         name,
@@ -462,304 +354,6 @@ function registerTools(
       continue;
     }
 
-    if (name === "permission_check") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: z.object({}).passthrough(),
-        },
-        async () => formatStructuredResult(await checkPermissions()),
-      );
-      continue;
-    }
-
-    if (name === "list_apps") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: z.object({}).passthrough(),
-        },
-        async () => formatStructuredResult(await listApps()),
-      );
-      continue;
-    }
-
-    if (name === "list_windows") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            app: z.string().optional(),
-            include_minimized: z.boolean().optional(),
-          },
-        },
-        async (args) => {
-          const appState = await listApps();
-          const windows = appState.apps
-            .filter((app) => !args.app || app.name === args.app || app.bundle_id === args.app)
-            .flatMap((app) =>
-              app.windows.map((window) => ({
-                ...window,
-                app_id: app.app_id,
-                app_name: app.name,
-                is_active: app.is_active,
-                is_minimized: false,
-              })),
-            );
-          return formatStructuredResult({ windows });
-        },
-      );
-      continue;
-    }
-
-    if (name === "open_app" || name === "activate_window") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            app: z.string().optional(),
-            bundle_id: z.string().optional(),
-            window_id: z.string().optional(),
-            window_title: z.string().optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              {
-                type: name === "activate_window" ? "focus" : "open_app",
-                app: args.app,
-                bundle_id: args.bundle_id,
-                window_id: args.window_id,
-                window_title: args.window_title,
-              },
-              { toolName: name, legacyApprovalShape: true },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "recover") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: z.object({}).passthrough(),
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              typeof args.session_id === "string" ? args.session_id : undefined,
-              { type: "recover" },
-              { toolName: name },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "press_key") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            key: z.string(),
-            modifiers: z.array(z.string()).optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              { type: "press_key", key: args.key, modifiers: args.modifiers },
-              { toolName: name },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "type_text") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            text: z.string(),
-            sensitive: z.boolean().optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              { type: "type_text", text: args.text, sensitive: args.sensitive },
-              { toolName: name },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "scroll") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            x: z.number().optional(),
-            y: z.number().optional(),
-            delta_x: z.number().optional(),
-            delta_y: z.number().optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              {
-                type: "scroll",
-                x: args.x,
-                y: args.y,
-                delta_x: args.delta_x,
-                delta_y: args.delta_y,
-              },
-              { toolName: name },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "click") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            element_id: z.string().optional(),
-            target: z.string().optional(),
-            selector: z
-              .object({
-                role: z.string().optional(),
-                label: z.string().optional(),
-                value: z.string().optional(),
-              })
-              .optional(),
-            app: z.string().optional(),
-            bundle_id: z.string().optional(),
-            x: z.number().optional(),
-            y: z.number().optional(),
-            button: z.enum(["left", "right"]).optional(),
-            click_count: z.number().optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              {
-                type: "click",
-                target: args.element_id
-                  ? { element_id: args.element_id }
-                  : args.selector
-                    ? args.selector
-                    : args.target
-                      ? { label: args.target }
-                      : undefined,
-                app: args.app,
-                bundle_id: args.bundle_id,
-                x: args.x,
-                y: args.y,
-              },
-              { toolName: name, legacyElementErrors: true },
-            ),
-          ),
-      );
-      continue;
-    }
-
-    if (name === "export_session") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string(),
-          },
-        },
-        async (args) => formatLegacyExportResult(exportSessionEvidence(sessionStore, artifactStore, args.session_id)),
-      );
-      continue;
-    }
-
-    if (name === "wait") {
-      server.registerTool(
-        name,
-        {
-          title: titleForTool(name),
-          description: descriptionForTool(name),
-          inputSchema: {
-            session_id: z.string().optional(),
-            seconds: z.number().min(0).max(30).default(1),
-            timeout_ms: z.number().min(1).max(30000).optional(),
-          },
-        },
-        async (args) =>
-          formatLegacyActionResult(
-            await runStableAction(
-              sessionStore,
-              artifactStore,
-              policy,
-              args.session_id,
-              { type: "wait", seconds: args.seconds, timeout_ms: args.timeout_ms },
-              { toolName: name },
-            ),
-          ),
-      );
-      continue;
-    }
-
     assertNever(name);
   }
 }
@@ -790,7 +384,7 @@ type StableAction = {
 
 type ActionRunResult =
   | { result: Record<string, unknown> }
-  | { error: Record<string, unknown>; metadata?: Record<string, unknown> };
+  | { error: Record<string, unknown> };
 
 async function runStableAction(
   sessionStore: SessionStore,
@@ -798,13 +392,7 @@ async function runStableAction(
   policy: PolicyEngine,
   sessionId: string | undefined,
   action: StableAction,
-  options: {
-    toolName?: string;
-    legacyApprovalShape?: boolean;
-    legacyElementErrors?: boolean;
-  } = {},
 ): Promise<ActionRunResult> {
-  const toolName = options.toolName ?? "act";
   if (action.type === "open_app" || action.type === "focus") {
     const activationArgs =
       action.type === "focus"
@@ -839,7 +427,7 @@ async function runStableAction(
       return {
         error: {
           code: "approval_required",
-          ...(options.legacyApprovalShape ? {} : { reason: decision.reason }),
+          reason: decision.reason,
           message: "App requires approval before activation.",
           recoverable: true,
         },
@@ -847,7 +435,7 @@ async function runStableAction(
     }
 
     return extractStructuredResult(
-      await withOptionalSessionStep(sessionStore, { session_id: sessionId, ...activationArgs }, toolName, async () => ({
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId, ...activationArgs }, "act", async () => ({
         ...(await activateApp(activationArgs)),
         active_window_id: activationArgs.window_id ?? "",
       })),
@@ -864,7 +452,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, text: action.text, sensitive: action.sensitive },
-        toolName,
+        "act",
         () => typeText({ text: action.text ?? "", strategy: "paste" }),
         { postObserve: { artifactStore } },
       ),
@@ -881,7 +469,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, key: action.key, modifiers: action.modifiers },
-        toolName,
+        "act",
         () => pressKey({ key: action.key ?? "", modifiers: action.modifiers }),
         { postObserve: { artifactStore } },
       ),
@@ -899,7 +487,7 @@ async function runStableAction(
           delta_x: action.delta_x,
           delta_y: action.delta_y,
         },
-        toolName,
+        "act",
         () => scroll(action),
         { postObserve: { artifactStore } },
       ),
@@ -908,7 +496,7 @@ async function runStableAction(
 
   if (action.type === "recover") {
     return extractStructuredResult(
-      await withOptionalSessionStep(sessionStore, { session_id: sessionId }, toolName, () => releaseModifiers(), {
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId }, "act", () => releaseModifiers(), {
         postObserve: { artifactStore },
       }),
     );
@@ -919,7 +507,7 @@ async function runStableAction(
       await withOptionalSessionStep(
         sessionStore,
         { session_id: sessionId, seconds: action.seconds, timeout_ms: action.timeout_ms },
-        toolName,
+        "act",
         async (_sessionId, signal) => {
           const waitedMs = Math.round((action.seconds ?? 1) * 1000);
           if (action.timeout_ms !== undefined && action.timeout_ms < waitedMs) {
@@ -971,10 +559,8 @@ async function runStableAction(
       return {
         error: {
           code: "target_not_found",
-          message: options.legacyElementErrors
-            ? "element_id clicks require session_id."
-            : "element_id actions require the session_id returned by observe.",
-          recoverable: !options.legacyElementErrors,
+          message: "element_id actions require the session_id returned by observe.",
+          recoverable: true,
         },
       };
     }
@@ -983,9 +569,7 @@ async function runStableAction(
       return {
         error: {
           code: "target_not_found",
-          message: options.legacyElementErrors
-            ? "Unknown or expired element_id."
-            : "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
+          message: "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
           recoverable: true,
         },
       };
@@ -1019,7 +603,7 @@ async function runStableAction(
     await withOptionalSessionStep(
       sessionStore,
       { session_id: sessionId, ...clickInput },
-      toolName,
+      "act",
       async (actualSessionId) => {
         const screenshot = await captureScreen();
         const artifact = artifactStore.saveFileArtifact({
@@ -1045,20 +629,9 @@ function extractStructuredResult(result: {
   structuredContent: Record<string, unknown>;
 }): ActionRunResult {
   if (isObject(result.structuredContent.error)) {
-    const { error, ...metadata } = result.structuredContent;
-    return {
-      error,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    };
+    return { error: result.structuredContent.error };
   }
   return { result: result.structuredContent };
-}
-
-function formatLegacyActionResult(result: ActionRunResult) {
-  if ("error" in result) {
-    return formatStructuredResult({ error: result.error, ...(result.metadata ?? {}) });
-  }
-  return formatStructuredResult(result.result);
 }
 
 function exportSessionEvidence(
@@ -1083,13 +656,6 @@ function exportSessionEvidence(
       steps: sessionStore.listSteps(sessionId),
     }),
   };
-}
-
-function formatLegacyExportResult(result: { result: Record<string, unknown> } | { error: Record<string, unknown> }) {
-  if ("error" in result) {
-    return formatStructuredResult({ error: result.error });
-  }
-  return formatStructuredResult(result.result);
 }
 
 function approvalRequiredError(reason: string): Record<string, unknown> {
@@ -1174,17 +740,6 @@ function formatStructuredResult(structuredContent: Record<string, unknown>) {
     ],
     structuredContent,
   };
-}
-
-function formatApprovalRequired(reason: string) {
-  return formatStructuredResult({
-    error: {
-      code: "approval_required",
-      reason,
-      message: `Action requires approval before continuing: ${reason}.`,
-      recoverable: true,
-    },
-  });
 }
 
 async function resolveWindowActivationArgs(args: {
@@ -1388,20 +943,16 @@ function titleForTool(name: string): string {
 
 function descriptionForTool(name: string): string {
   switch (name) {
-    case "start_session":
-      return "Create a controlled Computer Use session.";
-    case "list_apps":
-      return "List visible or running macOS apps.";
-    case "list_windows":
-      return "List macOS windows, optionally filtered by app.";
+    case "status":
+      return "Return runtime readiness, permissions, active target, policy, and trace state.";
     case "observe":
       return "Capture current screen and accessibility state.";
-    case "close_session":
-      return "Close a Computer Use session.";
-    case "cancel_session":
-      return "Cancel a running Computer Use session and run best-effort recovery.";
-    case "permission_check":
-      return "Return machine-readable permission diagnostics.";
+    case "act":
+      return "Execute one atomic Computer Use action through policy, audit, and observation handling.";
+    case "stop":
+      return "Cancel active work and put the runtime into a safe state.";
+    case "log":
+      return "Read or export trace and artifact evidence.";
     default:
       return `Computer Use action: ${name}.`;
   }

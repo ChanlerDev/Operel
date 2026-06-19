@@ -153,12 +153,12 @@ Retention:
 - target ambiguous：返回候选元素。
 - target stale：要求重新 observe。
 - 坐标不可信：返回 transform metadata 和最新 screenshot。
-- modifier 卡住：执行 `recover` 释放 modifier 并记录。
+- modifier 卡住：通过 `act({ "action": { "type": "recover" } })` 或 `stop` 释放 modifier 并记录。
 - 剪贴板未恢复：返回 `clipboard_unavailable`，提示用户检查当前剪贴板。
 
 ## 性能目标
 
-- `list_apps`: < 200ms。
+- `status`: < 300ms。
 - app-level `observe` without screenshot: < 500ms。
 - full screenshot + normalized tree: < 1500ms。
 - click/type/keypress action with post observe: < 2000ms。

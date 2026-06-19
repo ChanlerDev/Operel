@@ -35,9 +35,7 @@ describe("operel-computer-use mcp", () => {
       await client.connect(transport);
       const tools = await client.listTools();
 
-      expect(tools.tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["status", "observe", "act", "stop", "log", "start_session"]),
-      );
+      expect(tools.tools.map((tool) => tool.name).sort()).toEqual(["act", "log", "observe", "status", "stop"]);
     } finally {
       await client.close();
     }

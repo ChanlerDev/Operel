@@ -158,22 +158,22 @@ Open System Settings > Privacy & Security > Accessibility and allow this binary.
 operel-computer-use doctor --json
 ```
 
-`--json` 必须和 MCP `permission_check` 返回相同字段，方便 Agent 在执行前自检。
+`--json` 必须和 MCP `status.permissions` 返回同一组权限字段，方便 Agent 在执行前自检。
 
 ### `call`
 
 本地调试入口：
 
 ```bash
-operel-computer-use call list_apps
-operel-computer-use call observe --args '{"app":"TextEdit"}'
-operel-computer-use call type_text --args '{"session_id":"sess_...","text":"hello"}'
+operel-computer-use call status
+operel-computer-use call observe --args '{"target":{"app":"TextEdit"}}'
+operel-computer-use call act --args '{"action":{"type":"type_text","text":"hello"}}'
 ```
 
 `call` 还应支持从 stdin 读取参数，便于脚本和测试：
 
 ```bash
-echo '{"app":"TextEdit"}' | operel-computer-use call observe --stdin
+echo '{"target":{"app":"TextEdit"}}' | operel-computer-use call observe --stdin
 ```
 
 `call` 的行为必须和 MCP tool 一致：

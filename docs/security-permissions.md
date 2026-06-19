@@ -139,4 +139,4 @@ MVP action risk classifier:
 - approval timeout。
 - emergency stop。
 
-MCP 层可以通过 `cancel_session` tool 实现；未来 App 提供可见 Stop 按钮。
+MCP 层通过 `stop` tool 实现；未来 App 也应提供可见 Stop 按钮。

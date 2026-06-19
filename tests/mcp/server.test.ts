@@ -35,15 +35,18 @@ async function connectTestClient(
 }
 
 describe("Computer Use MCP server", () => {
-  it("lists the stable Computer Use tools from the public contract", async () => {
+  it("exposes only the stable agent-facing tools", async () => {
     const { client, server } = await connectTestClient();
 
     try {
       const tools = await client.listTools();
-      const names = tools.tools.map((tool) => tool.name);
-
-      expect(names).toEqual(expect.arrayContaining(["status", "observe", "act", "stop", "log"]));
-      expect(names).toEqual(expect.arrayContaining(["start_session", "click", "type_text", "export_session"]));
+      expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        "act",
+        "log",
+        "observe",
+        "status",
+        "stop",
+      ]);
     } finally {
       await server.close();
     }
@@ -64,6 +67,7 @@ describe("Computer Use MCP server", () => {
         permissions: {
           screen_recording: expect.stringMatching(/^(granted|missing|unknown)$/),
           accessibility: expect.stringMatching(/^(granted|missing|unknown)$/),
+          helper_status: expect.stringMatching(/^(ok|failed)$/),
         },
         active_app: expect.any(Object),
         active_window: expect.any(Object),
@@ -76,24 +80,226 @@ describe("Computer Use MCP server", () => {
     }
   });
 
-  it("returns a stable error for unknown cancel_session ids", async () => {
+  it("observes without requiring a caller-managed session", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "stableobserve",
+    });
+    const artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-observe-artifacts-")) });
+    const { client, server } = await connectTestClient(sessionStore, artifactStore);
+
+    try {
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {
+          target: { app: "TextEdit" },
+          include_screenshot: true,
+          include_accessibility_tree: true,
+          max_tree_depth: 2,
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        session_id: "sess_stableobserve",
+        observation_id: expect.stringMatching(/^obs_/),
+        accessibility_tree_id: expect.stringMatching(/^tree_/),
+        accessibility_tree_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_stableobserve\/artifacts\/artifact_/),
+        screen: {
+          screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_stableobserve\/artifacts\/artifact_/),
+          width: expect.any(Number),
+          height: expect.any(Number),
+        },
+        elements: expect.any(Array),
+      });
+      expect(existsSync((result.structuredContent as { accessibility_tree_path: string }).accessibility_tree_path)).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("routes typed atomic actions through act", async () => {
     const { client, server } = await connectTestClient();
 
     try {
       const result = await client.callTool({
-        name: "cancel_session",
+        name: "act",
         arguments: {
-          session_id: "sess_missing",
+          action: {
+            type: "type_text",
+            text: "hello from stable act",
+          },
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        action: { type: "type_text" },
+        result: {
+          strategy_used: "paste",
+          clipboard_restored: true,
+          session_id: expect.stringMatching(/^sess_/),
+          post_observation: {
+            screen: {
+              screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_.*\/artifacts\/artifact_/),
+            },
+          },
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses act as the single policy boundary for risky actions", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "act",
+        arguments: {
+          action: {
+            type: "click",
+            target: { label: "Delete account" },
+          },
         },
       });
 
       expect(result.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
         error: {
-          code: "session_expired",
-          message: "Unknown session: sess_missing",
+          code: "approval_required",
+          reason: "destructive_action",
+          message: "Action requires approval before continuing: destructive_action.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("blocks denied apps through act before runtime execution", async () => {
+    const policy = new PolicyEngine({
+      apps: {
+        allowed: [],
+        denied: ["System Settings"],
+        prompt: [],
+      },
+    });
+    const { client, server } = await connectTestClient(new SessionStore(), undefined, policy);
+
+    try {
+      const result = await client.callTool({
+        name: "act",
+        arguments: {
+          action: { type: "open_app", app: "System Settings" },
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
+        error: {
+          code: "app_denied",
+          message: "App is denied by policy.",
           recoverable: false,
         },
       });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns observation-refresh guidance for stale element actions", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "staleelement",
+    });
+    const session = sessionStore.startSession({ task: "Click stale element" });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const result = await client.callTool({
+        name: "act",
+        arguments: {
+          session_id: session.session_id,
+          action: {
+            type: "click",
+            target: { element_id: "el_missing" },
+          },
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
+        error: {
+          code: "target_not_found",
+          message: "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops active work and releases modifiers", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "stablestop",
+    });
+    const session = sessionStore.startSession({ task: "Stop me" });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const result = await client.callTool({
+        name: "stop",
+        arguments: { session_id: session.session_id },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        stopped: true,
+        recovery: {
+          released: ["cmd", "shift", "option", "control"],
+        },
+      });
+      expect(sessionStore.getSession(session.session_id)?.status).toBe("cancelled");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("exports session evidence through log", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "stablelog",
+    });
+    const artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-stable-log-")) });
+    const session = sessionStore.startSession({ task: "Log me" });
+    sessionStore.recordStep(session.session_id, {
+      tool: "act",
+      input: { action: { type: "wait" } },
+      result: { waited_ms: 0 },
+    });
+    const { client, server } = await connectTestClient(sessionStore, artifactStore);
+
+    try {
+      const result = await client.callTool({
+        name: "log",
+        arguments: { session_id: session.session_id, format: "bundle" },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        format: "bundle",
+        session_id: session.session_id,
+        uri: `operel://sessions/${session.session_id}/export`,
+        manifest_path: expect.any(String),
+        audit_path: expect.any(String),
+      });
+      expect(existsSync((result.structuredContent as { manifest_path: string }).manifest_path)).toBe(true);
+      expect(existsSync((result.structuredContent as { audit_path: string }).audit_path)).toBe(true);
     } finally {
       await server.close();
     }
@@ -122,815 +328,6 @@ describe("Computer Use MCP server", () => {
         "computer_use_operator",
         "computer_use_safety",
       ]);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("creates and closes sessions through MCP tools", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "mcpid",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const created = await client.callTool({
-        name: "start_session",
-        arguments: {
-          task: "Inspect TextEdit",
-          app: "TextEdit",
-        },
-      });
-
-      expect(created.structuredContent).toMatchObject({
-        session_id: "sess_mcpid",
-        status: "active",
-        task: "Inspect TextEdit",
-        app: "TextEdit",
-      });
-
-      const closed = await client.callTool({
-        name: "close_session",
-        arguments: {
-          session_id: "sess_mcpid",
-          reason: "completed",
-        },
-      });
-
-      expect(closed.structuredContent).toMatchObject({
-        session_id: "sess_mcpid",
-        status: "completed",
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("reads the session resource", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "resourceid",
-    });
-    sessionStore.startSession({ task: "Read sessions" });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const resource = await client.readResource({ uri: "operel://sessions" });
-      const firstContent = resource.contents[0];
-      const text = firstContent && "text" in firstContent ? firstContent.text : undefined;
-
-      expect(JSON.parse(String(text))).toMatchObject({
-        sessions: [
-          {
-            session_id: "sess_resourceid",
-            task: "Read sessions",
-            status: "active",
-          },
-        ],
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns runtime permission diagnostics from permission_check", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "permission_check",
-        arguments: {},
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        screen_recording: expect.stringMatching(/^(granted|missing|unknown)$/),
-        accessibility: expect.stringMatching(/^(granted|missing|unknown)$/),
-        helper_status: expect.stringMatching(/^(ok|failed)$/),
-        next_steps: expect.any(Array),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns running apps from list_apps", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "list_apps",
-        arguments: {},
-      });
-
-      const structured = result.structuredContent as { apps?: unknown[] };
-      expect(Array.isArray(structured.apps)).toBe(true);
-      expect(structured.apps?.length).toBeGreaterThan(0);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns windows grouped from app list in list_windows", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "list_windows",
-        arguments: {},
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        windows: expect.any(Array),
-      });
-      const windows = (result.structuredContent as { windows: unknown[] }).windows;
-      expect(windows.length).toBeGreaterThan(0);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("activates a running app through open_app", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const apps = await client.callTool({ name: "list_apps", arguments: {} });
-      const target = ((apps.structuredContent as { apps?: Array<{ name?: string }> }).apps ?? []).find(
-        (app) => app.name,
-      );
-      expect(target).toBeDefined();
-
-      const result = await client.callTool({
-        name: "open_app",
-        arguments: { app: target?.name },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        active_app: expect.any(String),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("activates a window by window_id", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const windows = await client.callTool({ name: "list_windows", arguments: {} });
-      const target = ((windows.structuredContent as { windows?: Array<{ window_id?: string }> }).windows ?? []).find(
-        (window) => window.window_id,
-      );
-      expect(target).toBeDefined();
-
-      const result = await client.callTool({
-        name: "activate_window",
-        arguments: { window_id: target?.window_id },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        active_app: expect.any(String),
-        active_window_id: target?.window_id,
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns a recoverable error for unknown window_id activation", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "activate_window",
-        arguments: { window_id: "win_missing" },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "target_not_found",
-          message: "Unknown window_id.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("blocks denied apps before activation", async () => {
-    const policy = new PolicyEngine({
-      apps: {
-        allowed: [],
-        denied: ["System Settings"],
-        prompt: [],
-      },
-    });
-    const { client, server } = await connectTestClient(new SessionStore(), undefined, policy);
-
-    try {
-      const result = await client.callTool({
-        name: "open_app",
-        arguments: { app: "System Settings" },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "app_denied",
-          message: "App is denied by policy.",
-          recoverable: false,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("observes a session with a screenshot artifact", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "observeid",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Observe screen" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "observe",
-        arguments: {
-          session_id: sessionId,
-          include_screenshot: true,
-          include_accessibility_tree: false,
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        session_id: sessionId,
-        screen: {
-          screenshot_uri: expect.stringMatching(
-            new RegExp(`^operel://sessions/${sessionId}/artifacts/artifact_`),
-          ),
-          width: expect.any(Number),
-          height: expect.any(Number),
-          scale: expect.any(Number),
-        },
-        elements: [],
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("observes accessibility elements when requested", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "axobserve",
-    });
-    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-ax-artifacts-"));
-    const { client, server } = await connectTestClient(
-      sessionStore,
-      new ArtifactStore({ root: artifactRoot }),
-    );
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Observe accessibility" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "observe",
-        arguments: {
-          session_id: sessionId,
-          include_screenshot: false,
-          include_accessibility_tree: true,
-          max_tree_depth: 2,
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        session_id: sessionId,
-        accessibility_tree_id: expect.stringMatching(/^tree_/),
-        accessibility_tree_uri: expect.stringMatching(
-          new RegExp(`^operel://sessions/${sessionId}/artifacts/artifact_`),
-        ),
-        elements: expect.any(Array),
-      });
-      expect(existsSync((result.structuredContent as { accessibility_tree_path: string }).accessibility_tree_path)).toBe(true);
-      const elements = (result.structuredContent as { elements: Array<{ element_id?: string }> }).elements;
-      if (elements.length > 0) {
-        expect(elements[0].element_id).toMatch(/^el_/);
-      }
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns a recoverable error for unknown element_id clicks", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "clickel",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Click element" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "click",
-        arguments: {
-          session_id: sessionId,
-          element_id: "el_missing",
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "target_not_found",
-          message: "Unknown or expired element_id.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("recovers by releasing modifiers", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "recover",
-        arguments: {},
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        released: ["cmd", "shift", "option", "control"],
-        session_id: expect.stringMatching(/^sess_/),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("presses a key through MCP", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "press_key",
-        arguments: {
-          key: "Escape",
-          modifiers: [],
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        performed: true,
-        session_id: expect.stringMatching(/^sess_/),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("requires approval for sensitive type_text input", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "type_text",
-        arguments: {
-          text: "sk-proj-sensitive123456789",
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "approval_required",
-          reason: "sensitive_text",
-          message: "Action requires approval before continuing: sensitive_text.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("requires approval for risky click targets before runtime execution", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "click",
-        arguments: {
-          target: "Delete account",
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "approval_required",
-          reason: "destructive_action",
-          message: "Action requires approval before continuing: destructive_action.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("routes typed atomic actions through act", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "act",
-        arguments: {
-          action: {
-            type: "type_text",
-            text: "hello from stable act",
-          },
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        trace_id: expect.stringMatching(/^trace_/),
-        action: { type: "type_text" },
-        result: {
-          strategy_used: "paste",
-          clipboard_restored: true,
-          session_id: expect.stringMatching(/^sess_/),
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("uses the stable act policy boundary for risky actions", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "act",
-        arguments: {
-          action: {
-            type: "click",
-            target: { label: "Delete account" },
-          },
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        trace_id: expect.stringMatching(/^trace_/),
-        error: {
-          code: "approval_required",
-          reason: "destructive_action",
-          message: "Action requires approval before continuing: destructive_action.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("stops active work and releases modifiers through stop", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "stableStop",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Stop me" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "stop",
-        arguments: { session_id: sessionId },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        trace_id: expect.stringMatching(/^trace_/),
-        stopped: true,
-        recovery: {
-          released: ["cmd", "shift", "option", "control"],
-        },
-      });
-      expect(sessionStore.getSession(sessionId)?.status).toBe("cancelled");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("exports session evidence through log", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "stableLog",
-    });
-    const artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-stable-log-")) });
-    const { client, server } = await connectTestClient(sessionStore, artifactStore);
-
-    try {
-      const session = sessionStore.startSession({ task: "Log me" });
-      sessionStore.recordStep(session.session_id, {
-        tool: "act",
-        input: { action: { type: "wait" } },
-        result: { waited_ms: 0 },
-      });
-
-      const result = await client.callTool({
-        name: "log",
-        arguments: { session_id: session.session_id, format: "bundle" },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        trace_id: expect.stringMatching(/^trace_/),
-        format: "bundle",
-        session_id: session.session_id,
-        uri: `operel://sessions/${session.session_id}/export`,
-        manifest_path: expect.any(String),
-        audit_path: expect.any(String),
-      });
-      expect(existsSync((result.structuredContent as { manifest_path: string }).manifest_path)).toBe(true);
-      expect(existsSync((result.structuredContent as { audit_path: string }).audit_path)).toBe(true);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("requires approval for destructive key presses before runtime execution", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "press_key",
-        arguments: {
-          key: "Delete",
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "approval_required",
-          reason: "destructive_action",
-          message: "Action requires approval before continuing: destructive_action.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("types non-sensitive text through MCP", async () => {
-    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-type-artifacts-"));
-    const artifactStore = new ArtifactStore({ root: artifactRoot });
-    const { client, server } = await connectTestClient(undefined, artifactStore);
-
-    try {
-      const result = await client.callTool({
-        name: "type_text",
-        arguments: {
-          text: "hello from operel",
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        strategy_used: "paste",
-        clipboard_restored: true,
-        session_id: expect.stringMatching(/^sess_/),
-        post_observation: {
-          screen: {
-            screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_.*\/artifacts\/artifact_/),
-          },
-        },
-      });
-      const screenshotUri = (result.structuredContent as {
-        post_observation: { screen: { screenshot_uri: string } };
-      }).post_observation.screen.screenshot_uri;
-      const artifactId = screenshotUri.split("/").at(-1);
-      expect(artifactId).toBeDefined();
-      expect(existsSync(join(artifactRoot, "sessions", (result.structuredContent as { session_id: string }).session_id, "artifacts", `${artifactId}.png`))).toBe(true);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("scrolls through MCP", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "scroll",
-        arguments: {
-          x: 0,
-          y: 0,
-          delta_x: 0,
-          delta_y: 0,
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        performed: true,
-        session_id: expect.stringMatching(/^sess_/),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns runtime errors for invalid click calls", async () => {
-    const { client, server } = await connectTestClient();
-
-    try {
-      const result = await client.callTool({
-        name: "click",
-        arguments: {},
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "action_failed",
-          message: "input.click requires x and y coordinates.",
-          recoverable: true,
-        },
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("records a screenshot artifact for coordinate clicks", async () => {
-    const artifactRoot = mkdtempSync(join(tmpdir(), "operel-click-artifacts-"));
-    const artifactStore = new ArtifactStore({ root: artifactRoot });
-    const { client, server } = await connectTestClient(undefined, artifactStore);
-
-    try {
-      const result = await client.callTool({
-        name: "click",
-        arguments: {
-          x: 0,
-          y: 0,
-        },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        performed: true,
-        session_id: expect.stringMatching(/^sess_/),
-        screenshot_uri: expect.stringMatching(/^operel:\/\/sessions\/sess_.*\/artifacts\/artifact_/),
-      });
-      expect(existsSync((result.structuredContent as { screenshot_path: string }).screenshot_path)).toBe(true);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("exports a session manifest", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "exportmcp",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Export from MCP" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "export_session",
-        arguments: { session_id: sessionId },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        session_id: sessionId,
-        uri: `operel://sessions/${sessionId}/export`,
-        export_path: expect.any(String),
-        manifest_path: expect.any(String),
-      });
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("records action steps with session_id for export audit", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "auditmcp",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Audit from MCP" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      await client.callTool({
-        name: "wait",
-        arguments: { session_id: sessionId, seconds: 0 },
-      });
-
-      const steps = sessionStore.listSteps(sessionId);
-      expect(steps).toMatchObject([
-        {
-          tool: "wait",
-          input: {
-            session_id: sessionId,
-            seconds: 0,
-          },
-          result: {
-            waited_ms: 0,
-          },
-        },
-      ]);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("waits through MCP", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "adhoc",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const result = await client.callTool({
-        name: "wait",
-        arguments: { seconds: 0 },
-      });
-
-      expect(result.structuredContent).toMatchObject({
-        waited_ms: 0,
-        session_id: "sess_adhoc",
-      });
-      expect(sessionStore.listSessions()).toMatchObject([
-        {
-          session_id: "sess_adhoc",
-          task: "Ad hoc wait",
-        },
-      ]);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("returns a stable timeout error for session actions", async () => {
-    const sessionStore = new SessionStore({
-      now: () => new Date("2026-06-18T00:00:00.000Z"),
-      id: () => "timeout",
-    });
-    const { client, server } = await connectTestClient(sessionStore);
-
-    try {
-      const session = await client.callTool({
-        name: "start_session",
-        arguments: { task: "Timeout wait" },
-      });
-      const sessionId = (session.structuredContent as { session_id: string }).session_id;
-
-      const result = await client.callTool({
-        name: "wait",
-        arguments: {
-          session_id: sessionId,
-          seconds: 0.05,
-          timeout_ms: 1,
-        },
-      });
-
-      expect(result.structuredContent).toEqual({
-        error: {
-          code: "action_timeout",
-          message: "action timed out after 1ms",
-          recoverable: true,
-        },
-        session_id: sessionId,
-      });
-      expect(sessionStore.listSteps(sessionId)).toEqual([]);
     } finally {
       await server.close();
     }
