@@ -55,6 +55,9 @@ const client = new Client(
 async function call(name, args) {
   const result = await client.callTool({ name, arguments: args });
   const structured = result.structuredContent;
+  if (!structured) {
+    throw new Error(`${name} returned no structuredContent: ${JSON.stringify(result)}`);
+  }
   if (structured?.error) {
     throw new Error(`${name} failed: ${JSON.stringify(structured.error)}`);
   }
@@ -66,20 +69,20 @@ try {
 
   const tools = await client.listTools();
   const toolNames = new Set(tools.tools.map((tool) => tool.name));
-  for (const name of ["start_session", "open_app", "observe", "type_text", "export_session", "close_session"]) {
+  for (const name of ["status", "observe", "act", "stop", "log"]) {
     if (!toolNames.has(name)) {
       throw new Error(`missing MCP tool: ${name}`);
     }
   }
 
-  const session = await call("start_session", {
-    task: "Agent TextEdit smoke",
-    app: "TextEdit",
+  const status = await call("status", {});
+  await call("act", {
+    trace_id: status.trace_id,
+    action: { type: "open_app", app: "TextEdit" },
   });
-  await call("open_app", { session_id: session.session_id, app: "TextEdit" });
   const observation = await call("observe", {
-    session_id: session.session_id,
-    app: "TextEdit",
+    trace_id: status.trace_id,
+    target: { app: "TextEdit" },
     include_screenshot: true,
     include_accessibility_tree: true,
     max_tree_depth: 3,
@@ -88,24 +91,31 @@ try {
   if (!observedElements.some((element) => typeof element.element_id === "string" && element.element_id.startsWith("el_"))) {
     throw new Error("observe did not return session-scoped element_id values");
   }
-  await call("type_text", {
-    session_id: session.session_id,
-    text: `hello from operel agent smoke ${new Date().toISOString()}`,
+  await call("act", {
+    trace_id: status.trace_id,
+    session_id: observation.session_id,
+    action: {
+      type: "type_text",
+      text: `hello from operel agent smoke ${new Date().toISOString()}`,
+    },
   });
-  const exported = await call("export_session", {
-    session_id: session.session_id,
+  const exported = await call("log", {
+    trace_id: status.trace_id,
+    session_id: observation.session_id,
+    format: "bundle",
   });
-  await call("close_session", {
-    session_id: session.session_id,
-    reason: "completed",
+  await call("stop", {
+    trace_id: status.trace_id,
+    session_id: observation.session_id,
   });
 
   if (!existsSync(exported.manifest_path) || !existsSync(exported.audit_path)) {
-    throw new Error("export_session did not write manifest and audit files");
+    throw new Error("log did not write manifest and audit files");
   }
 
   console.log(JSON.stringify({
-    session_id: session.session_id,
+    trace_id: status.trace_id,
+    session_id: observation.session_id,
     export_uri: exported.uri,
     manifest_path: exported.manifest_path,
     audit_path: exported.audit_path,

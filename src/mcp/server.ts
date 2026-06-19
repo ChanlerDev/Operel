@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
@@ -13,6 +15,10 @@ import { captureScreen } from "../runtime/screen.js";
 import { click, pressKey, releaseModifiers, scroll, typeText } from "../runtime/input.js";
 
 const mvpToolNames = [
+  "status",
+  "act",
+  "stop",
+  "log",
   "start_session",
   "list_apps",
   "list_windows",
@@ -60,6 +66,212 @@ function registerTools(
   policy: PolicyEngine,
 ): void {
   for (const name of mvpToolNames) {
+    if (name === "status") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            trace_id: z.string().optional(),
+          },
+        },
+        async (args) => {
+          const traceId = args.trace_id ?? createTraceId();
+          const [permissions, appState] = await Promise.all([checkPermissions(), listApps()]);
+          const activeApp = appState.apps.find((app) => app.is_active) ?? appState.apps[0];
+          const activeWindow = activeApp?.windows[0];
+          const ready = permissions.screen_recording === "granted" && permissions.accessibility === "granted";
+
+          return formatStructuredResult({
+            trace_id: traceId,
+            ready,
+            permissions: {
+              screen_recording: permissions.screen_recording,
+              accessibility: permissions.accessibility,
+              helper_status: permissions.helper_status,
+            },
+            code_signing: permissions.code_signing,
+            active_app: activeApp
+              ? {
+                  app_id: activeApp.app_id,
+                  name: activeApp.name,
+                  bundle_id: activeApp.bundle_id,
+                  pid: activeApp.pid,
+                }
+              : {},
+            active_window: activeWindow
+              ? {
+                  window_id: activeWindow.window_id,
+                  title: activeWindow.title,
+                  bounds: activeWindow.bounds,
+                }
+              : {},
+            policy: {
+              require_confirmation_for_risky_actions: true,
+            },
+            warnings: permissions.next_steps ?? [],
+            next_steps: permissions.next_steps ?? [],
+          });
+        },
+      );
+      continue;
+    }
+
+    if (name === "act") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            trace_id: z.string().optional(),
+            session_id: z.string().optional(),
+            action: z
+              .object({
+                type: z.enum(["open_app", "focus", "click", "type_text", "press_key", "scroll", "wait", "recover"]),
+                app: z.string().optional(),
+                bundle_id: z.string().optional(),
+                window_id: z.string().optional(),
+                window_title: z.string().optional(),
+                target: z
+                  .object({
+                    element_id: z.string().optional(),
+                    label: z.string().optional(),
+                    role: z.string().optional(),
+                    value: z.string().optional(),
+                  })
+                  .optional(),
+                text: z.string().optional(),
+                sensitive: z.boolean().optional(),
+                key: z.string().optional(),
+                modifiers: z.array(z.string()).optional(),
+                x: z.number().optional(),
+                y: z.number().optional(),
+                delta_x: z.number().optional(),
+                delta_y: z.number().optional(),
+                seconds: z.number().optional(),
+                timeout_ms: z.number().optional(),
+              })
+              .passthrough(),
+          },
+        },
+        async (args) => {
+          const traceId = args.trace_id ?? createTraceId();
+          const action = args.action;
+          const result = await runStableAction(sessionStore, artifactStore, policy, args.session_id, action);
+
+          if ("error" in result) {
+            return formatStructuredResult({
+              trace_id: traceId,
+              error: result.error,
+            });
+          }
+
+          return formatStructuredResult({
+            trace_id: traceId,
+            action: { type: action.type },
+            result: result.result,
+          });
+        },
+      );
+      continue;
+    }
+
+    if (name === "stop") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            trace_id: z.string().optional(),
+            session_id: z.string().optional(),
+          },
+        },
+        async (args) => {
+          const traceId = args.trace_id ?? createTraceId();
+          if (args.session_id && sessionStore.getSession(args.session_id)?.status === "active") {
+            sessionStore.abortActiveOperations(args.session_id);
+          }
+
+          let recovery: Record<string, unknown>;
+          try {
+            recovery = await releaseModifiers();
+          } catch (error) {
+            recovery = {
+              performed: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+          if (args.session_id && sessionStore.getSession(args.session_id)?.status === "active") {
+            sessionStore.recordStep(args.session_id, {
+              tool: "stop",
+              input: args,
+              result: { recovery },
+            });
+            sessionStore.closeSession(args.session_id, "cancelled");
+          }
+
+          return formatStructuredResult({
+            trace_id: traceId,
+            stopped: true,
+            recovery,
+          });
+        },
+      );
+      continue;
+    }
+
+    if (name === "log") {
+      server.registerTool(
+        name,
+        {
+          title: titleForTool(name),
+          description: descriptionForTool(name),
+          inputSchema: {
+            trace_id: z.string().optional(),
+            session_id: z.string().optional(),
+            format: z.enum(["summary", "jsonl", "bundle"]).default("summary"),
+          },
+        },
+        async (args) => {
+          const traceId = args.trace_id ?? createTraceId();
+          if (args.session_id) {
+            const session = sessionStore.getSession(args.session_id);
+            if (!session) {
+              return formatStructuredResult({
+                trace_id: traceId,
+                error: {
+                  code: "session_expired",
+                  message: `Unknown session: ${args.session_id}`,
+                  recoverable: false,
+                },
+              });
+            }
+
+            const exported = artifactStore.exportSession({
+              session,
+              steps: sessionStore.listSteps(args.session_id),
+            });
+            return formatStructuredResult({
+              trace_id: traceId,
+              format: args.format,
+              ...exported,
+            });
+          }
+
+          return formatStructuredResult({
+            trace_id: traceId,
+            format: args.format,
+            sessions: sessionStore.listSessions(),
+          });
+        },
+      );
+      continue;
+    }
+
     if (name === "start_session") {
       server.registerTool(
         name,
@@ -160,7 +372,15 @@ function registerTools(
           title: titleForTool(name),
           description: descriptionForTool(name),
           inputSchema: {
-            session_id: z.string(),
+            trace_id: z.string().optional(),
+            session_id: z.string().optional(),
+            target: z
+              .object({
+                app: z.string().optional(),
+                bundle_id: z.string().optional(),
+                window_id: z.string().optional(),
+              })
+              .optional(),
             app: z.string().optional(),
             bundle_id: z.string().optional(),
             window_id: z.string().optional(),
@@ -179,23 +399,28 @@ function registerTools(
           },
         },
         async (args) => {
+          const traceId = args.trace_id ?? createTraceId();
+          const sessionId = args.session_id ?? sessionStore.startSession({ task: "Stable observe", app: args.target?.app ?? args.app }).session_id;
+          const app = args.app ?? args.target?.app;
+          const bundleId = args.bundle_id ?? args.target?.bundle_id;
+          const windowId = args.window_id ?? args.target?.window_id;
           const screenshot =
             args.include_screenshot === false
               ? undefined
               : await captureScreen({
                   scope: args.screenshot_scope ?? "display",
-                  app: args.app,
-                  bundle_id: args.bundle_id,
-                  window_id: args.window_id,
+                  app,
+                  bundle_id: bundleId,
+                  window_id: windowId,
                   rect: args.rect,
                 });
           const accessibility =
             args.include_accessibility_tree === false
               ? undefined
-              : await readAccessibilityTree({ app: args.app, bundle_id: args.bundle_id, max_depth: args.max_tree_depth });
+              : await readAccessibilityTree({ app, bundle_id: bundleId, max_depth: args.max_tree_depth });
           const artifact = screenshot
             ? artifactStore.saveFileArtifact({
-                session_id: args.session_id,
+                session_id: sessionId,
                 kind: "screenshot",
                 source_path: screenshot.tmp_path,
                 extension: "png",
@@ -204,20 +429,23 @@ function registerTools(
             : undefined;
           const accessibilityArtifact = accessibility
             ? artifactStore.saveJsonArtifact({
-                session_id: args.session_id,
+                session_id: sessionId,
                 kind: "accessibility_tree",
                 value: accessibility,
               })
             : undefined;
           const elements = accessibility
             ? sessionStore.registerElements(
-                args.session_id,
+                sessionId,
                 accessibility.tree_id,
                 flattenAccessibilityNodes(accessibility.nodes),
               )
             : [];
+          const observationId = `obs_${randomUUID()}`;
           const result = {
-            session_id: args.session_id,
+            trace_id: traceId,
+            session_id: sessionId,
+            observation_id: observationId,
             accessibility_tree_id: accessibility?.tree_id,
             accessibility_tree_uri: accessibilityArtifact?.uri,
             accessibility_tree_path: accessibilityArtifact?.path,
@@ -235,7 +463,7 @@ function registerTools(
               : undefined,
             elements,
           };
-          sessionStore.recordStep(args.session_id, {
+          sessionStore.recordStep(sessionId, {
             tool: "observe",
             input: args,
             result,
@@ -617,6 +845,295 @@ function registerTools(
 
     assertNever(name);
   }
+}
+
+type StableAction = {
+  type: "open_app" | "focus" | "click" | "type_text" | "press_key" | "scroll" | "wait" | "recover";
+  app?: string;
+  bundle_id?: string;
+  window_id?: string;
+  window_title?: string;
+  target?: {
+    element_id?: string;
+    label?: string;
+    role?: string;
+    value?: string;
+  };
+  text?: string;
+  sensitive?: boolean;
+  key?: string;
+  modifiers?: string[];
+  x?: number;
+  y?: number;
+  delta_x?: number;
+  delta_y?: number;
+  seconds?: number;
+  timeout_ms?: number;
+};
+
+async function runStableAction(
+  sessionStore: SessionStore,
+  artifactStore: ArtifactStore,
+  policy: PolicyEngine,
+  sessionId: string | undefined,
+  action: StableAction,
+): Promise<{ result: Record<string, unknown> } | { error: Record<string, unknown> }> {
+  if (action.type === "open_app" || action.type === "focus") {
+    const activationArgs =
+      action.type === "focus"
+        ? await resolveWindowActivationArgs({
+            app: action.app,
+            bundle_id: action.bundle_id,
+            window_id: action.window_id,
+            window_title: action.window_title,
+          })
+        : {
+            app: action.app,
+            bundle_id: action.bundle_id,
+            window_id: action.window_id,
+            window_title: action.window_title,
+          };
+    if ("error" in activationArgs) {
+      return { error: activationArgs.error };
+    }
+
+    const appName = activationArgs.app ?? activationArgs.bundle_id ?? "";
+    const decision = policy.evaluateApp(appName);
+    if (decision.decision === "denied") {
+      return {
+        error: {
+          code: decision.reason,
+          message: "App is denied by policy.",
+          recoverable: false,
+        },
+      };
+    }
+    if (decision.decision === "prompt_required") {
+      return {
+        error: {
+          code: "approval_required",
+          reason: decision.reason,
+          message: "App requires approval before activation.",
+          recoverable: true,
+        },
+      };
+    }
+
+    return extractStructuredResult(
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId, ...activationArgs }, "act", async () => ({
+        ...(await activateApp(activationArgs)),
+        active_window_id: activationArgs.window_id ?? "",
+      })),
+    );
+  }
+
+  if (action.type === "type_text") {
+    const decision = policy.evaluateAction({ tool: "type_text", text: action.text });
+    if (action.sensitive || decision.decision === "approval_required") {
+      return { error: approvalRequiredError(decision.reason ?? "sensitive_text") };
+    }
+
+    return extractStructuredResult(
+      await withOptionalSessionStep(
+        sessionStore,
+        { session_id: sessionId, text: action.text, sensitive: action.sensitive },
+        "act",
+        () => typeText({ text: action.text ?? "", strategy: "paste" }),
+        { postObserve: { artifactStore } },
+      ),
+    );
+  }
+
+  if (action.type === "press_key") {
+    const decision = policy.evaluateAction({ tool: "press_key", key: action.key, modifiers: action.modifiers });
+    if (decision.decision === "approval_required") {
+      return { error: approvalRequiredError(decision.reason) };
+    }
+
+    return extractStructuredResult(
+      await withOptionalSessionStep(
+        sessionStore,
+        { session_id: sessionId, key: action.key, modifiers: action.modifiers },
+        "act",
+        () => pressKey({ key: action.key ?? "", modifiers: action.modifiers }),
+        { postObserve: { artifactStore } },
+      ),
+    );
+  }
+
+  if (action.type === "scroll") {
+    return extractStructuredResult(
+      await withOptionalSessionStep(
+        sessionStore,
+        {
+          session_id: sessionId,
+          x: action.x,
+          y: action.y,
+          delta_x: action.delta_x,
+          delta_y: action.delta_y,
+        },
+        "act",
+        () => scroll(action),
+        { postObserve: { artifactStore } },
+      ),
+    );
+  }
+
+  if (action.type === "recover") {
+    return extractStructuredResult(
+      await withOptionalSessionStep(sessionStore, { session_id: sessionId }, "act", () => releaseModifiers(), {
+        postObserve: { artifactStore },
+      }),
+    );
+  }
+
+  if (action.type === "wait") {
+    return extractStructuredResult(
+      await withOptionalSessionStep(
+        sessionStore,
+        { session_id: sessionId, seconds: action.seconds, timeout_ms: action.timeout_ms },
+        "act",
+        async (_sessionId, signal) => {
+          const waitedMs = Math.round((action.seconds ?? 1) * 1000);
+          if (action.timeout_ms !== undefined && action.timeout_ms < waitedMs) {
+            await delay(action.timeout_ms, signal);
+            throw new Error(`action timed out after ${action.timeout_ms}ms`);
+          }
+          if (waitedMs > 0) {
+            await delay(waitedMs, signal);
+          }
+          return { waited_ms: waitedMs };
+        },
+      ),
+    );
+  }
+
+  const clickTarget = action.target?.label ?? action.target?.value;
+  const decision = policy.evaluateAction({
+    tool: "click",
+    target: clickTarget,
+    selector: {
+      label: action.target?.label,
+      role: action.target?.role,
+      value: action.target?.value,
+    },
+  });
+  if (decision.decision === "approval_required") {
+    return { error: approvalRequiredError(decision.reason) };
+  }
+
+  let clickInput: Record<string, unknown> = {
+    session_id: sessionId,
+    element_id: action.target?.element_id,
+    target: clickTarget,
+    selector: action.target
+      ? {
+          label: action.target.label,
+          role: action.target.role,
+          value: action.target.value,
+        }
+      : undefined,
+    app: action.app,
+    bundle_id: action.bundle_id,
+    x: action.x,
+    y: action.y,
+  };
+
+  if (action.target?.element_id) {
+    if (!sessionId) {
+      return {
+        error: {
+          code: "target_not_found",
+          message: "element_id actions require the session_id returned by observe.",
+          recoverable: true,
+        },
+      };
+    }
+    const element = sessionStore.getElement(sessionId, action.target.element_id);
+    if (!element) {
+      return {
+        error: {
+          code: "target_not_found",
+          message: "Unknown or expired element_id. Observe again to refresh observation_id and elements.",
+          recoverable: true,
+        },
+      };
+    }
+    clickInput = {
+      ...clickInput,
+      x: Math.round(element.frame.x + element.frame.width / 2),
+      y: Math.round(element.frame.y + element.frame.height / 2),
+      app: action.app ?? sessionStore.getSession(sessionId)?.app,
+      ax_role: element.role,
+      ax_label: element.label,
+      ax_value: element.value,
+      ax_x: element.frame.x,
+      ax_y: element.frame.y,
+      ax_width: element.frame.width,
+      ax_height: element.frame.height,
+    };
+  } else if ((clickTarget || action.target) && (action.x === undefined || action.y === undefined)) {
+    const accessibility = await readAccessibilityTree({ app: action.app, bundle_id: action.bundle_id });
+    const resolution = resolveClickTarget(
+      { target: clickTarget, selector: action.target },
+      flattenAccessibilityNodes(accessibility.nodes),
+    );
+    if (!resolution.ok) {
+      return { error: resolution.error };
+    }
+    clickInput = { ...clickInput, ...resolution.click };
+  }
+
+  return extractStructuredResult(
+    await withOptionalSessionStep(
+      sessionStore,
+      { session_id: sessionId, ...clickInput },
+      "act",
+      async (actualSessionId) => {
+        const screenshot = await captureScreen();
+        const artifact = artifactStore.saveFileArtifact({
+          session_id: actualSessionId,
+          kind: "screenshot",
+          source_path: screenshot.tmp_path,
+          extension: "png",
+          mime_type: "image/png",
+        });
+        return {
+          ...(await click(clickInput)),
+          screenshot_uri: artifact.uri,
+          screenshot_path: artifact.path,
+          coordinate_space: screenshot.coordinate_space,
+        };
+      },
+      { postObserve: { artifactStore } },
+    ),
+  );
+}
+
+function extractStructuredResult(result: {
+  structuredContent: Record<string, unknown>;
+}): { result: Record<string, unknown> } | { error: Record<string, unknown> } {
+  if (isObject(result.structuredContent.error)) {
+    return { error: result.structuredContent.error };
+  }
+  return { result: result.structuredContent };
+}
+
+function approvalRequiredError(reason: string): Record<string, unknown> {
+  return {
+    code: "approval_required",
+    reason,
+    message: `Action requires approval before continuing: ${reason}.`,
+    recoverable: true,
+  };
+}
+
+function createTraceId(): string {
+  return `trace_${randomUUID()}`;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function assertNever(value: never): never {

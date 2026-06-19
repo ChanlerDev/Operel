@@ -35,8 +35,9 @@ describe("operel-computer-use mcp", () => {
       await client.connect(transport);
       const tools = await client.listTools();
 
-      expect(tools.tools.map((tool) => tool.name)).toContain("start_session");
-      expect(tools.tools.map((tool) => tool.name)).toContain("permission_check");
+      expect(tools.tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["status", "observe", "act", "stop", "log", "start_session"]),
+      );
     } finally {
       await client.close();
     }
@@ -59,7 +60,7 @@ describe("operel-computer-use mcp", () => {
       const tools = await client.listTools();
       const resources = await client.listResources();
 
-      expect(tools.tools.map((tool) => tool.name)).toContain("start_session");
+      expect(tools.tools.map((tool) => tool.name)).toContain("status");
       expect(resources.resources.map((resource) => resource.uri)).toContain("operel://sessions");
     } finally {
       await client.close();
@@ -94,11 +95,14 @@ denied = ["System Settings"]
     try {
       await client.connect(transport);
       const result = await client.callTool({
-        name: "open_app",
-        arguments: { app: "System Settings" },
+        name: "act",
+        arguments: {
+          action: { type: "open_app", app: "System Settings" },
+        },
       });
 
       expect(result.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
         error: {
           code: "app_denied",
           message: "App is denied by policy.",

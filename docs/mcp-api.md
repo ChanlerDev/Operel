@@ -19,7 +19,7 @@ MCP 是首选入口，因为它让不同 Agent 用同一套 tools/resources/prom
 
 ## 设计修正：少量 Agent-facing tools
 
-当前实现已经能工作，但原始 MCP surface 暴露了过多内部原语。更合理的稳定产品面应收敛到少量 intent-level tools：
+原始 MCP surface 暴露了过多内部原语。当前稳定产品面已收敛到少量 intent-level tools：
 
 | Stable tool | Replaces | Why |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ MCP 是首选入口，因为它让不同 Agent 用同一套 tools/resources/prom
 | `stop` | `cancel_session`, most manual `recover` | 安全停止、释放 modifier、取消当前动作。 |
 | `log` | `export_session`, session resources | 读取或导出 trace/audit/artifacts。 |
 
-Legacy fine-grained tools can remain during migration, but they should be treated as compatibility/debug surface, not the preferred product contract.
+Legacy fine-grained tools remain as compatibility/debug surface, not the preferred product contract.
 
 ### Session ID 重新定义
 
@@ -52,7 +52,7 @@ See [ADR-0005](./decisions/ADR-0005-minimal-agent-facing-mcp-surface.md).
 - 新稳定工具使用 `status`、`observe`、`act`、`stop`、`log`。
 - 旧动作工具接受可选 `session_id`，但这是兼容层，不是推荐 Agent workflow。
 
-## Target Stable Tools
+## Stable Tools
 
 ### `status`
 

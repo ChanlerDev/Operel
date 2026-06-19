@@ -53,11 +53,12 @@
 
 ```bash
 operel-computer-use doctor
-operel-computer-use call list_apps
-operel-computer-use call open_app --args '{"app":"TextEdit"}'
-operel-computer-use call observe --args '{"app":"TextEdit"}'
-operel-computer-use call type_text --args '{"app":"TextEdit","text":"hello from operel"}'
-operel-computer-use call export_session --args '{"session_id":"..."}'
+operel-computer-use call status
+operel-computer-use call act --args '{"action":{"type":"open_app","app":"TextEdit"}}'
+operel-computer-use call observe --args '{"target":{"app":"TextEdit"}}'
+operel-computer-use call act --args '{"session_id":"...","action":{"type":"type_text","text":"hello from operel"}}'
+operel-computer-use call log --args '{"session_id":"...","format":"bundle"}'
+operel-computer-use call stop --args '{"session_id":"..."}'
 ```
 
 ### Permission Matrix
@@ -93,7 +94,7 @@ operel-computer-use mcp
 For `mcp`, use a minimal MCP client fixture to verify:
 
 - initialize succeeds.
-- `tools/list` includes MVP tools.
+- `tools/list` includes the stable tools: `status`, `observe`, `act`, `stop`, `log`.
 - `resources/list` includes session and policy resources.
 - `prompts/list` includes safety/operator prompts.
 

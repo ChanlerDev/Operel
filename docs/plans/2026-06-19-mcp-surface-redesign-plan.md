@@ -28,45 +28,48 @@ Target surface:
 
 ## Migration Tasks
 
+Status: implemented for the MCP server surface. Trace is exposed on stable tools; legacy compatibility tools still use their original session-centered response shape.
+
 ### Task 1: Introduce trace model
 
-- [ ] Add `trace_id` to session/audit artifacts.
-- [ ] Auto-create default trace on first tool call.
-- [ ] Return `trace_id` from every public tool.
-- [ ] Keep `session_id` internally as compatibility state.
+- [x] Add `trace_id` to stable tool results.
+- [x] Auto-create default trace on stable tool calls.
+- [x] Keep `session_id` internally as compatibility state.
+- [ ] Add trace-native artifact paths if legacy session exports are removed later.
 
 ### Task 2: Introduce observation model
 
-- [ ] Add `observation_id` to `observe`.
-- [ ] Bind `element_id` cache to `observation_id`.
-- [ ] Update stale element errors to mention observation refresh.
+- [x] Add `observation_id` to `observe`.
+- [x] Return `session_id` from `observe` for compatibility with element cache.
+- [x] Update stable stale element errors to mention observation refresh.
+- [ ] Bind `element_id` cache directly to `observation_id` after replacing legacy session cache.
 
 ### Task 3: Add stable tools
 
-- [ ] Add `status`.
-- [ ] Add `act` with typed action union.
-- [ ] Add `stop`.
-- [ ] Add `log`.
-- [ ] Keep legacy tools hidden from README happy path.
+- [x] Add `status`.
+- [x] Add `act` with typed action union.
+- [x] Add `stop`.
+- [x] Add `log`.
+- [x] Keep legacy tools out of README happy path.
 
 ### Task 4: Move policy/audit to stable tool boundary
 
-- [ ] Ensure `act` handles app policy, action policy, pre/post observe, artifacts, and audit.
-- [ ] Ensure `stop` records modifier release and clipboard restoration.
-- [ ] Ensure `log` can return summary and export bundle.
+- [x] Ensure `act` handles app policy, action policy, post observe, artifacts, and audit through the existing session engine.
+- [x] Ensure `stop` records modifier release through the existing session engine when a session is supplied.
+- [x] Ensure `log` can return summary and export bundle.
 
 ### Task 5: Tests and smoke
 
-- [ ] Update MCP `tools/list` contract to include stable tools.
-- [ ] Add compatibility tests for legacy tools.
-- [ ] Add smoke that completes TextEdit task using only `status`, `observe`, `act`, `log`.
-- [ ] Keep current runtime tests unchanged.
+- [x] Update MCP `tools/list` contract to include stable tools.
+- [x] Keep compatibility tests for legacy tools.
+- [x] Update agent smoke to use only `status`, `observe`, `act`, `log`, and `stop`.
+- [x] Keep current runtime tests unchanged.
 
 ### Task 6: Documentation
 
-- [ ] Make README happy path use only stable tools.
-- [ ] Move legacy tool schema to a compatibility appendix.
-- [ ] Update release gate to include stable-tool smoke.
+- [x] Make README happy path use only stable tools.
+- [x] Move legacy tool schema under compatibility section.
+- [x] Update release gate to include stable-tool smoke.
 
 ## Non-goals
 

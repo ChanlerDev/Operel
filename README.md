@@ -19,11 +19,10 @@ Implemented today:
 
 Current API shape:
 
-- The implemented MCP server currently exposes fine-grained runtime tools such as `start_session`, `list_apps`, `observe`, `click`, `type_text`, `press_key`, `scroll`, `recover`, and `export_session`.
-- Those tools are functional, but they expose too many internal primitives for a general Computer Use product.
-- The target stable agent-facing surface is now five tools: `status`, `observe`, `act`, `stop`, and `log`.
+- The stable agent-facing MCP surface is five tools: `status`, `observe`, `act`, `stop`, and `log`.
+- The server still exposes fine-grained runtime tools such as `start_session`, `list_apps`, `click`, `type_text`, `press_key`, `scroll`, `recover`, and `export_session` as compatibility/debug tools.
 - `session_id` is no longer the preferred happy-path API. Logs and artifacts should be grouped by an automatic `trace_id`; element ids should be scoped by `observation_id`; a public `session_id` only makes sense when it represents an explicit desktop-control lease.
-- See [ADR-0005](./docs/decisions/ADR-0005-minimal-agent-facing-mcp-surface.md) and [MCP API](./docs/mcp-api.md). The current fine-grained tools should be treated as compatibility/debug surface during migration.
+- See [ADR-0005](./docs/decisions/ADR-0005-minimal-agent-facing-mcp-surface.md) and [MCP API](./docs/mcp-api.md).
 
 Target MCP entrypoints:
 
@@ -82,7 +81,10 @@ Debug a runtime method locally:
 
 ```bash
 operel-computer-use call runtime.ping
-operel-computer-use call observe --args '{"session_id":"sess_...","include_screenshot":true}'
+operel-computer-use call status
+operel-computer-use call observe --args '{"target":{"app":"TextEdit"},"include_screenshot":true}'
+operel-computer-use call act --args '{"action":{"type":"type_text","text":"hello from operel"}}'
+operel-computer-use call log --args '{"format":"summary"}'
 ```
 
 ## Verification

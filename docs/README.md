@@ -36,7 +36,7 @@ Operel 的目标是做一个 Mac 优先的通用 Computer Use 项目，给其他
 5. 一个安全层，默认 app 级 allow/deny，敏感/破坏性/外发风险动作返回 approval，不默认执行。
 6. 两个 MCP client 安装入口：`install codex` 和 `install claude`。
 
-设计重审后，长期稳定 MCP surface 不应继续扩张细粒度工具；目标是收敛到 `status`、`observe`、`act`、`stop`、`log`。当前细粒度工具保留为兼容/调试层。见 [ADR-0005](./decisions/ADR-0005-minimal-agent-facing-mcp-surface.md)。
+设计重审后，稳定 MCP surface 已收敛到 `status`、`observe`、`act`、`stop`、`log`。当前细粒度工具保留为兼容/调试层。见 [ADR-0005](./decisions/ADR-0005-minimal-agent-facing-mcp-surface.md)。
 
 真实验证路径见 [Release Notes](./release-notes.md)。
 

@@ -35,31 +35,42 @@ async function connectTestClient(
 }
 
 describe("Computer Use MCP server", () => {
-  it("lists the MVP tools from the public contract", async () => {
+  it("lists the stable Computer Use tools from the public contract", async () => {
     const { client, server } = await connectTestClient();
 
     try {
       const tools = await client.listTools();
-      const names = tools.tools.map((tool) => tool.name).sort();
+      const names = tools.tools.map((tool) => tool.name);
 
-      expect(names).toEqual([
-        "activate_window",
-        "cancel_session",
-        "click",
-        "close_session",
-        "export_session",
-        "list_apps",
-        "list_windows",
-        "observe",
-        "open_app",
-        "permission_check",
-        "press_key",
-        "recover",
-        "scroll",
-        "start_session",
-        "type_text",
-        "wait",
-      ]);
+      expect(names).toEqual(expect.arrayContaining(["status", "observe", "act", "stop", "log"]));
+      expect(names).toEqual(expect.arrayContaining(["start_session", "click", "type_text", "export_session"]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns readiness, active target, policy, and trace information from status", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "status",
+        arguments: {},
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        ready: expect.any(Boolean),
+        permissions: {
+          screen_recording: expect.stringMatching(/^(granted|missing|unknown)$/),
+          accessibility: expect.stringMatching(/^(granted|missing|unknown)$/),
+        },
+        active_app: expect.any(Object),
+        active_window: expect.any(Object),
+        policy: expect.any(Object),
+        warnings: expect.any(Array),
+        next_steps: expect.any(Array),
+      });
     } finally {
       await server.close();
     }
@@ -537,6 +548,130 @@ describe("Computer Use MCP server", () => {
           recoverable: true,
         },
       });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("routes typed atomic actions through act", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "act",
+        arguments: {
+          action: {
+            type: "type_text",
+            text: "hello from stable act",
+          },
+        },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        action: { type: "type_text" },
+        result: {
+          strategy_used: "paste",
+          clipboard_restored: true,
+          session_id: expect.stringMatching(/^sess_/),
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses the stable act policy boundary for risky actions", async () => {
+    const { client, server } = await connectTestClient();
+
+    try {
+      const result = await client.callTool({
+        name: "act",
+        arguments: {
+          action: {
+            type: "click",
+            target: { label: "Delete account" },
+          },
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
+        error: {
+          code: "approval_required",
+          reason: "destructive_action",
+          message: "Action requires approval before continuing: destructive_action.",
+          recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops active work and releases modifiers through stop", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "stableStop",
+    });
+    const { client, server } = await connectTestClient(sessionStore);
+
+    try {
+      const session = await client.callTool({
+        name: "start_session",
+        arguments: { task: "Stop me" },
+      });
+      const sessionId = (session.structuredContent as { session_id: string }).session_id;
+
+      const result = await client.callTool({
+        name: "stop",
+        arguments: { session_id: sessionId },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        stopped: true,
+        recovery: {
+          released: ["cmd", "shift", "option", "control"],
+        },
+      });
+      expect(sessionStore.getSession(sessionId)?.status).toBe("cancelled");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("exports session evidence through log", async () => {
+    const sessionStore = new SessionStore({
+      now: () => new Date("2026-06-18T00:00:00.000Z"),
+      id: () => "stableLog",
+    });
+    const artifactStore = new ArtifactStore({ root: mkdtempSync(join(tmpdir(), "operel-stable-log-")) });
+    const { client, server } = await connectTestClient(sessionStore, artifactStore);
+
+    try {
+      const session = sessionStore.startSession({ task: "Log me" });
+      sessionStore.recordStep(session.session_id, {
+        tool: "act",
+        input: { action: { type: "wait" } },
+        result: { waited_ms: 0 },
+      });
+
+      const result = await client.callTool({
+        name: "log",
+        arguments: { session_id: session.session_id, format: "bundle" },
+      });
+
+      expect(result.structuredContent).toMatchObject({
+        trace_id: expect.stringMatching(/^trace_/),
+        format: "bundle",
+        session_id: session.session_id,
+        uri: `operel://sessions/${session.session_id}/export`,
+        manifest_path: expect.any(String),
+        audit_path: expect.any(String),
+      });
+      expect(existsSync((result.structuredContent as { manifest_path: string }).manifest_path)).toBe(true);
+      expect(existsSync((result.structuredContent as { audit_path: string }).audit_path)).toBe(true);
     } finally {
       await server.close();
     }
