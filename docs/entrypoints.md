@@ -103,10 +103,10 @@ operel-computer-use install claude --config-path /tmp/settings.json --command /a
 2. core policy 判断动作风险。
 3. 如果风险高，tool 返回 `approval_required`，不执行动作。
 3. Agent 向用户解释动作影响。
-4. 用户确认后，Agent 重新调用带 approval token 的动作或交给 host approval UI。
+4. `confirm_on_retry` 模式下，Agent 重新调用并带回 `confirmation_token`；`manual` 模式交给用户改 CLI/config；`full_access` 模式不拦截。
 5. Core 记录 approval event，再执行动作。
 
-首版可以只实现“返回 `approval_required`，由上层 Agent 重新发起确认后继续”的简化流程，但不能默认执行风险动作。
+`full_access` 是显式 operator 模式。它允许默认执行风险动作，但必须由用户通过 CLI/config 开启。
 
 ### 停止/恢复任务
 
@@ -177,6 +177,18 @@ echo '{"target":{"app":"TextEdit"}}' | operel-computer-use call observe --stdin
 ```
 
 `call` 的行为必须和 MCP tool 一致：
+
+### `config`
+
+```bash
+operel-computer-use config path
+operel-computer-use config print
+operel-computer-use config mode manual
+operel-computer-use config mode confirm-on-retry
+operel-computer-use config mode full-access
+```
+
+`manual` 使用 app allow/deny/prompt；`confirm-on-retry` 默认允许 app 但风险动作需要 token retry；`full-access` 不做 app/action policy 拦截。
 
 - 同样读取配置。
 - 同样执行 policy。

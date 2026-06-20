@@ -21,6 +21,7 @@ Current API shape:
 
 - The stable agent-facing MCP surface is five tools: `status`, `observe`, `act`, `stop`, and `log`.
 - MCP tool content returns short summaries plus screenshot `image/png` content when available; full machine data stays in `structuredContent`, and local paths/runtime handles stay out of the public response.
+- Access modes are configurable: `manual`, `confirm_on_retry`, or `full_access`.
 - `session_id` is no longer the preferred happy-path API. Logs and artifacts should be grouped by an automatic `trace_id`; element ids should be scoped by `observation_id`; a public `session_id` only makes sense when it represents an explicit desktop-control lease.
 - See [ADR-0005](./docs/decisions/ADR-0005-minimal-agent-facing-mcp-surface.md) and [MCP API](./docs/mcp-api.md).
 
@@ -75,6 +76,14 @@ Run diagnostics:
 
 ```bash
 operel-computer-use doctor --json
+```
+
+Set access mode:
+
+```bash
+operel-computer-use config mode manual
+operel-computer-use config mode confirm-on-retry
+operel-computer-use config mode full-access
 ```
 
 Debug a runtime method locally:

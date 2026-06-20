@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { describe, expect, it } from "vitest";
 
-import { initConfig, loadConfig } from "../../src/core/config.js";
+import { initConfig, loadConfig, setAccessMode } from "../../src/core/config.js";
 
 describe("loadConfig", () => {
   it("loads app and policy settings from TOML", () => {
@@ -18,6 +18,9 @@ allowed = ["TextEdit"]
 denied = ["System Settings"]
 prompt = ["Safari"]
 
+[access]
+mode = "confirm_on_retry"
+
 [policy]
 require_confirmation_for_risky_actions = true
 redact_sensitive_text_in_logs = true
@@ -29,6 +32,9 @@ redact_sensitive_text_in_logs = true
         allowed: ["TextEdit"],
         denied: ["System Settings"],
         prompt: ["Safari"],
+      },
+      access: {
+        mode: "confirm_on_retry",
       },
       policy: {
         require_confirmation_for_risky_actions: true,
@@ -43,6 +49,9 @@ redact_sensitive_text_in_logs = true
         allowed: [],
         denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
         prompt: [],
+      },
+      access: {
+        mode: "manual",
       },
       policy: {
         require_confirmation_for_risky_actions: true,
@@ -68,9 +77,41 @@ redact_sensitive_text_in_logs = true
         denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
         prompt: [],
       },
+      access: {
+        mode: "manual",
+      },
       policy: {
         require_confirmation_for_risky_actions: true,
         redact_sensitive_text_in_logs: true,
+      },
+    });
+  });
+
+  it("updates access mode while preserving app policy", () => {
+    const root = mkdtempSync(join(tmpdir(), "operel-config-mode-"));
+    const path = join(root, "config.toml");
+    writeFileSync(
+      path,
+      `
+[access]
+mode = "manual"
+
+[apps]
+allowed = ["TextEdit"]
+denied = ["System Settings"]
+prompt = []
+`,
+    );
+
+    const result = setAccessMode("full_access", path);
+
+    expect(result).toEqual({ path, mode: "full_access" });
+    expect(loadConfig(path)).toMatchObject({
+      access: { mode: "full_access" },
+      apps: {
+        allowed: ["TextEdit"],
+        denied: ["System Settings"],
+        prompt: [],
       },
     });
   });

@@ -31,6 +31,11 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["config", "path"])).toEqual({ command: "config", action: "path" });
     expect(parseCliArgs(["config", "init"])).toEqual({ command: "config", action: "init" });
     expect(parseCliArgs(["config", "print"])).toEqual({ command: "config", action: "print" });
+    expect(parseCliArgs(["config", "mode", "full-access"])).toEqual({
+      command: "config",
+      action: "mode",
+      mode: "full_access",
+    });
   });
 
   it("routes install subcommands", () => {

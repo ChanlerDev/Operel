@@ -109,6 +109,33 @@ describe("runCli", () => {
     expect(writes.join("")).toContain("config.toml");
   });
 
+  it("updates config access mode from the CLI", async () => {
+    const previous = process.env.OPEREL_COMPUTER_USE_CONFIG;
+    const writes: string[] = [];
+    const root = mkdtempSync(join(tmpdir(), "operel-cli-config-mode-"));
+    const configPath = join(root, "config.toml");
+    process.env.OPEREL_COMPUTER_USE_CONFIG = configPath;
+
+    try {
+      const exitCode = await runCli(["config", "mode", "full-access"], {
+        write: (chunk) => writes.push(chunk),
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(writes.join(""))).toEqual({
+        path: configPath,
+        mode: "full_access",
+      });
+      expect(readFileSync(configPath, "utf8")).toContain('mode = "full_access"');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPEREL_COMPUTER_USE_CONFIG;
+      } else {
+        process.env.OPEREL_COMPUTER_USE_CONFIG = previous;
+      }
+    }
+  });
+
   it("installs MCP config from the CLI", async () => {
     const writes: string[] = [];
     const root = mkdtempSync(join(tmpdir(), "operel-cli-install-"));

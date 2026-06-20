@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { parseCliArgs } from "./args.js";
-import { defaultConfigPath, initConfig, loadConfig } from "../core/config.js";
+import { defaultConfigPath, initConfig, loadConfig, setAccessMode } from "../core/config.js";
 import { installMcpConfig } from "../core/mcp-install.js";
 import { PolicyEngine } from "../core/policy.js";
 import { createComputerUseServer } from "../mcp/server.js";
@@ -81,6 +81,10 @@ export async function runCli(argv: string[], services: CliServices = {}): Promis
           write(`${JSON.stringify(initConfig(), null, 2)}\n`);
           return 0;
         }
+        if (command.action === "mode") {
+          write(`${JSON.stringify(setAccessMode(command.mode), null, 2)}\n`);
+          return 0;
+        }
         write(`${JSON.stringify(redactConfig(loadConfig()), null, 2)}\n`);
         return 0;
       }
@@ -116,6 +120,7 @@ export function helpText(): string {
     "  mcp                 Start the MCP server over stdio",
     "  doctor [--json]     Check macOS permissions and runtime health",
     "  config <action>     Manage config path, init, and print",
+    "  config mode <mode>   Set access mode: manual, confirm-on-retry, or full-access",
     "  install <client>     Install MCP config for codex or claude",
     "  call <tool>         Invoke a tool for local debugging",
     "",
@@ -167,6 +172,7 @@ async function defaultCall(tool: string, args: unknown): Promise<unknown> {
   const config = loadConfig();
   const server = createComputerUseServer({
     policy: new PolicyEngine({
+      access: config.access,
       apps: config.apps,
     }),
   });
@@ -202,6 +208,7 @@ async function defaultStartMcp(): Promise<void> {
   const config = loadConfig();
   const server = createComputerUseServer({
     policy: new PolicyEngine({
+      access: config.access,
       apps: config.apps,
     }),
   });

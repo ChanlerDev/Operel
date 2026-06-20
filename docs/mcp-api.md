@@ -39,6 +39,15 @@ MCP 是 Operel 的稳定 Agent 入口。当前公共 tool surface 只包含：
 - `trace_id`: 自动创建的日志/audit/artifact 分组 id。每个 stable tool result 返回它；调用方只有在要合并到既有 trace 时才传入。
 - `observation_id`: 每次 `observe` 生成。`element_id` 的语义有效期绑定到 observation；失效时应重新 observe。
 - `session_id`: 不是 happy-path 必填参数。当前实现仍用它作为内部 action serialization、element cache 和 artifact export 的 backing id；`observe` 会返回它，只有需要用 `element_id` 执行动作或导出 bundle 时才传入。
+- `confirmation_token`: `confirm_on_retry` 模式下，风险动作第一次返回的确认 token。第二次 `act` 顶层带回同一个 token 才放行。
+
+## Access Modes
+
+`~/.operel/computer-use/config.toml` 中的 `[access].mode` 控制 policy 摩擦：
+
+- `manual`: 严格使用 `[apps]` allow/deny/prompt，风险动作返回 approval。
+- `confirm_on_retry`: app 默认允许；风险动作第一次返回 `approval_required.confirmation_token`，第二次带 token 放行。
+- `full_access`: 完全操作权；不做 app deny，也不做 risky action confirmation。
 
 ## Tools
 
@@ -107,6 +116,7 @@ Input:
 {
   "trace_id": "trace_...",
   "session_id": "sess_...",
+  "confirmation_token": "confirm_destructive_action",
   "action": {
     "type": "click | type_text | press_key | scroll | open_app | focus | wait | recover",
     "target": {
@@ -130,6 +140,8 @@ Contract:
 - 一次只执行一个动作。
 - 所有动作统一经过 app policy、action risk policy、target resolution、serialization、artifact 和 audit。
 - 风险动作返回 `approval_required`，不执行。
+- 在 `confirm_on_retry` 模式下，`approval_required` 会包含 `confirmation_token`；第二次调用把它作为 `act` 顶层字段传回即可继续。
+- 在 `full_access` 模式下，app policy 和风险动作 policy 不拦截。
 - 纯坐标点击没有可靠语义，默认返回 `approval_required`；优先使用 `element_id`、label/value selector 或重新 observe。
 - 带 AX target 的 runtime click 如果找不到元素，会返回 `target_not_found`，不会自动回退到坐标点击。
 - 动作后返回 `result.post_observation`，除非动作失败或无法观察。

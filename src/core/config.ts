@@ -4,6 +4,9 @@ import { dirname, join } from "node:path";
 import { parse } from "smol-toml";
 
 export type OperelConfig = {
+  access: {
+    mode: AccessMode;
+  };
   apps: {
     allowed: string[];
     denied: string[];
@@ -14,6 +17,8 @@ export type OperelConfig = {
     redact_sensitive_text_in_logs: boolean;
   };
 };
+
+export type AccessMode = "manual" | "confirm_on_retry" | "full_access";
 
 export function defaultConfigPath(): string {
   return (
@@ -28,10 +33,14 @@ export function loadConfig(path = defaultConfigPath()): OperelConfig {
   }
 
   const parsed = parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  const access = isObject(parsed.access) ? parsed.access : {};
   const apps = isObject(parsed.apps) ? parsed.apps : {};
   const policy = isObject(parsed.policy) ? parsed.policy : {};
 
   return {
+    access: {
+      mode: accessModeValue(access.mode, "manual"),
+    },
     apps: {
       allowed: stringArray(apps.allowed),
       denied: stringArray(apps.denied),
@@ -57,22 +66,44 @@ export function initConfig(path = defaultConfigPath()): { path: string; created:
   return { path, created: true };
 }
 
+export function setAccessMode(mode: AccessMode, path = defaultConfigPath()): { path: string; mode: AccessMode } {
+  const config = loadConfig(path);
+  const next = {
+    ...config,
+    access: { mode },
+  };
+
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, formatConfigText(next));
+  return { path, mode };
+}
+
 export function defaultConfigText(): string {
+  return formatConfigText(defaultConfig());
+}
+
+function formatConfigText(config: OperelConfig): string {
   return [
+    "[access]",
+    `mode = "${config.access.mode}"`,
+    "",
     "[apps]",
-    'allowed = []',
-    'denied = ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"]',
-    'prompt = []',
+    `allowed = ${formatStringArray(config.apps.allowed)}`,
+    `denied = ${formatStringArray(config.apps.denied)}`,
+    `prompt = ${formatStringArray(config.apps.prompt)}`,
     "",
     "[policy]",
-    "require_confirmation_for_risky_actions = true",
-    "redact_sensitive_text_in_logs = true",
+    `require_confirmation_for_risky_actions = ${config.policy.require_confirmation_for_risky_actions}`,
+    `redact_sensitive_text_in_logs = ${config.policy.redact_sensitive_text_in_logs}`,
     "",
   ].join("\n");
 }
 
 function defaultConfig(): OperelConfig {
   return {
+    access: {
+      mode: "manual",
+    },
     apps: {
       allowed: [],
       denied: ["System Settings", "com.apple.SystemSettings", "Keychain Access", "com.apple.keychainaccess"],
@@ -91,6 +122,17 @@ function stringArray(value: unknown): string[] {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function accessModeValue(value: unknown, fallback: AccessMode): AccessMode {
+  if (value === "manual" || value === "confirm_on_retry" || value === "full_access") {
+    return value;
+  }
+  return fallback;
+}
+
+function formatStringArray(values: string[]): string {
+  return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

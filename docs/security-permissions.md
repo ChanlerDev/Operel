@@ -26,6 +26,9 @@ Operel 不能绕过 TCC，也不能修改系统数据库。
 本地配置：
 
 ```toml
+[access]
+mode = "manual" # manual | confirm_on_retry | full_access
+
 [apps]
 allowed = ["TextEdit", "Safari"]
 denied = ["Keychain Access", "System Settings"]
@@ -38,6 +41,12 @@ prompt = ["Google Chrome"]
 - app policy 同时匹配显示名称和 bundle id；默认 deny 包含 `System Settings` / `com.apple.SystemSettings` 与 `Keychain Access` / `com.apple.keychainaccess`。
 - 未列入时默认 prompt。
 - 允许 app 不等于允许所有动作；敏感动作仍需确认。
+
+Access mode:
+
+- `manual`: 严格使用 `[apps]` allow/deny/prompt。适合希望自己配置边界的用户。
+- `confirm_on_retry`: app 默认允许；风险动作第一次返回 `approval_required` 和 `confirmation_token`，第二次带同一个 token 才放行。
+- `full_access`: 完全操作权。app 和 action policy 都不拦截，不保留默认 deny；只受 macOS TCC、helper 能力和底层系统限制。
 
 ### Action Policy
 
@@ -105,7 +114,11 @@ MVP action risk classifier:
 - `press_key` 的 Delete/Backspace 类按键默认视为 `destructive_action`。
 - 坐标点击没有可靠语义，默认返回 `coordinate_click` approval；调用方应优先使用 `element_id`、`target` 或 selector。
 - 带 AX target 的 click 找不到匹配元素时必须失败，不能静默回退到坐标点击。
-- `sensitive=true` 的 text input 不能使用 pasteboard；当前 runtime 直接拒绝，直到有不触碰剪贴板的安全输入策略。
+- direct runtime call 中 `sensitive=true` 的 text input 不能使用 pasteboard；当前 helper 直接拒绝，直到有不触碰剪贴板的安全输入策略。MCP 层由 access mode 决定是否放行。
+
+在 `confirm_on_retry` 模式下，风险动作的第一次响应包含 `confirmation_token`；调用方必须在第二次 `act` 顶层参数中原样带回。不要靠“看起来重复的请求”隐式放行。
+
+在 `full_access` 模式下，上述 action policy 不拦截。该模式是显式的 operator 模式，不是默认安全模式。
 
 ## 日志脱敏
 
@@ -126,14 +139,23 @@ MVP action risk classifier:
 - 谁批准了风险动作。
 - action 是否真的执行。
 
-## 最小权限 UX
+## 权限 UX
 
-首版不要默认允许所有 app。建议：
+建议：
 
 - 首次运行只引导系统权限。
-- 第一次操作某个 app 前提示 app approval。
-- 用户可在配置中 Always allow 或 deny。
+- 非高敏用户可以使用 `confirm_on_retry` 减少 app allowlist 摩擦。
+- 高信任本机自动化场景可以显式开启 `full_access`。
+- 在意边界的用户使用 `manual`，通过 CLI 或 config 配置 allow/deny。
 - `doctor` 显示当前 policy，但不打印敏感数据。
+
+CLI:
+
+```bash
+operel-computer-use config mode manual
+operel-computer-use config mode confirm-on-retry
+operel-computer-use config mode full-access
+```
 
 ## 中断与取消
 

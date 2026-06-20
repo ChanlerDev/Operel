@@ -3,6 +3,7 @@ export type CliCommand =
   | { command: "mcp" }
   | { command: "doctor"; json: boolean }
   | { command: "config"; action: "path" | "init" | "print" }
+  | { command: "config"; action: "mode"; mode: "manual" | "confirm_on_retry" | "full_access" }
   | { command: "install"; client: "codex" | "claude"; configPath?: string; serverCommand?: string }
   | { command: "call"; tool: string; args: unknown; stdin: boolean };
 
@@ -41,8 +42,24 @@ function parseConfigArgs(args: string[]): CliCommand {
   if (action === "path" || action === "init" || action === "print") {
     return { command: "config", action };
   }
+  if (action === "mode") {
+    return { command: "config", action, mode: parseAccessMode(args[1]) };
+  }
 
   throw new Error(`unknown config action: ${action}`);
+}
+
+function parseAccessMode(value: string | undefined): "manual" | "confirm_on_retry" | "full_access" {
+  if (value === "manual") {
+    return "manual";
+  }
+  if (value === "confirm-on-retry" || value === "confirm_on_retry") {
+    return "confirm_on_retry";
+  }
+  if (value === "full-access" || value === "full_access") {
+    return "full_access";
+  }
+  throw new Error("config mode requires: manual, confirm-on-retry, or full-access");
 }
 
 function parseInstallArgs(args: string[]): CliCommand {

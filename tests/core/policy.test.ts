@@ -66,6 +66,10 @@ describe("PolicyEngine", () => {
       decision: "approval_required",
       reason: "sensitive_text",
     });
+    expect(policy.evaluateAction({ tool: "type_text", text: "not secret", sensitive: true })).toEqual({
+      decision: "approval_required",
+      reason: "sensitive_text",
+    });
   });
 
   it("requires approval for destructive click targets", () => {
@@ -109,5 +113,45 @@ describe("PolicyEngine", () => {
       decision: "approval_required",
       reason: "destructive_action",
     });
+  });
+
+  it("confirm-on-retry allows apps but requires a matching token for risky actions", () => {
+    const policy = new PolicyEngine({
+      access: { mode: "confirm_on_retry" },
+      apps: {
+        allowed: [],
+        denied: ["System Settings"],
+        prompt: [],
+      },
+    });
+
+    expect(policy.evaluateApp("System Settings")).toEqual({ decision: "allowed" });
+
+    const first = policy.evaluateAction({ tool: "click", target: "Delete account" });
+    expect(first).toEqual({
+      decision: "approval_required",
+      reason: "destructive_action",
+      confirmation_token: "confirm_destructive_action",
+    });
+    expect(policy.evaluateAction({ tool: "click", target: "Delete account", confirmation_token: "confirm_destructive_action" })).toEqual({
+      decision: "allowed",
+    });
+  });
+
+  it("full access allows all apps and risky actions", () => {
+    const policy = new PolicyEngine({
+      access: { mode: "full_access" },
+      apps: {
+        allowed: [],
+        denied: ["System Settings"],
+        prompt: [],
+      },
+    });
+
+    expect(policy.evaluateApp("System Settings")).toEqual({ decision: "allowed" });
+    expect(policy.evaluateAction({ tool: "click" })).toEqual({ decision: "allowed" });
+    expect(policy.evaluateAction({ tool: "type_text", text: "sk-proj-abc123456789" })).toEqual({ decision: "allowed" });
+    expect(policy.evaluateAction({ tool: "type_text", text: "not secret", sensitive: true })).toEqual({ decision: "allowed" });
+    expect(policy.evaluateAction({ tool: "press_key", key: "Delete" })).toEqual({ decision: "allowed" });
   });
 });

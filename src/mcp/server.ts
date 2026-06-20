@@ -39,7 +39,7 @@ export function createComputerUseServer(options: ComputerUseServerOptions = {}):
   });
 
   registerTools(server, sessionStore, artifactStore, policy);
-  registerResources(server, sessionStore);
+  registerResources(server, sessionStore, policy);
   registerPrompts(server);
 
   return server;
@@ -94,6 +94,7 @@ function registerTools(
                 }
               : {},
             policy: {
+              access_mode: policy.accessMode(),
               require_confirmation_for_risky_actions: true,
             },
             warnings: permissions.next_steps ?? [],
@@ -113,6 +114,7 @@ function registerTools(
           inputSchema: {
             trace_id: z.string().optional(),
             session_id: z.string().optional(),
+            confirmation_token: z.string().optional(),
             action: z
               .object({
                 type: z.enum(["open_app", "focus", "click", "type_text", "press_key", "scroll", "wait", "recover"]),
@@ -145,7 +147,7 @@ function registerTools(
         async (args) => {
           const traceId = args.trace_id ?? createTraceId();
           const action = args.action;
-          const result = await runStableAction(sessionStore, artifactStore, policy, args.session_id, action);
+          const result = await runStableAction(sessionStore, artifactStore, policy, args.session_id, action, args.confirmation_token);
 
           if ("error" in result) {
             return formatStructuredResult({
@@ -392,6 +394,7 @@ async function runStableAction(
   policy: PolicyEngine,
   sessionId: string | undefined,
   action: StableAction,
+  confirmationToken?: string,
 ): Promise<ActionRunResult> {
   if (action.type === "open_app" || action.type === "focus") {
     const activationArgs =
@@ -442,9 +445,14 @@ async function runStableAction(
   }
 
   if (action.type === "type_text") {
-    const decision = policy.evaluateAction({ tool: "type_text", text: action.text });
-    if (action.sensitive || decision.decision === "approval_required") {
-      return { error: approvalRequiredError(decision.reason ?? "sensitive_text") };
+    const decision = policy.evaluateAction({
+      tool: "type_text",
+      text: action.text,
+      sensitive: action.sensitive,
+      confirmation_token: confirmationToken,
+    });
+    if (decision.decision === "approval_required") {
+      return { error: approvalRequiredError(decision.reason ?? "sensitive_text", decision.confirmation_token) };
     }
 
     return extractStructuredResult(
@@ -459,9 +467,14 @@ async function runStableAction(
   }
 
   if (action.type === "press_key") {
-    const decision = policy.evaluateAction({ tool: "press_key", key: action.key, modifiers: action.modifiers });
+    const decision = policy.evaluateAction({
+      tool: "press_key",
+      key: action.key,
+      modifiers: action.modifiers,
+      confirmation_token: confirmationToken,
+    });
     if (decision.decision === "approval_required") {
-      return { error: approvalRequiredError(decision.reason) };
+      return { error: approvalRequiredError(decision.reason, decision.confirmation_token) };
     }
 
     return extractStructuredResult(
@@ -531,9 +544,10 @@ async function runStableAction(
       role: action.target?.role,
       value: action.target?.value,
     },
+    confirmation_token: confirmationToken,
   });
   if (decision.decision === "approval_required") {
-    return { error: approvalRequiredError(decision.reason) };
+    return { error: approvalRequiredError(decision.reason, decision.confirmation_token) };
   }
 
   let clickInput: Record<string, unknown> = {
@@ -658,12 +672,13 @@ function exportSessionEvidence(
   };
 }
 
-function approvalRequiredError(reason: string): Record<string, unknown> {
+function approvalRequiredError(reason: string, confirmationToken?: string): Record<string, unknown> {
   return {
     code: "approval_required",
     reason,
     message: `Action requires approval before continuing: ${reason}.`,
     recoverable: true,
+    ...(confirmationToken ? { confirmation_token: confirmationToken } : {}),
   };
 }
 
@@ -679,7 +694,7 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled MCP tool: ${String(value)}`);
 }
 
-function registerResources(server: McpServer, sessionStore: SessionStore): void {
+function registerResources(server: McpServer, sessionStore: SessionStore, policy: PolicyEngine): void {
   server.registerResource(
     "policy",
     "operel://policy",
@@ -695,6 +710,7 @@ function registerResources(server: McpServer, sessionStore: SessionStore): void 
           mimeType: "application/json",
           text: JSON.stringify(
             {
+              access_mode: policy.accessMode(),
               apps: {
                 allowed: [],
                 denied: [],

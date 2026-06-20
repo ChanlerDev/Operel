@@ -1,4 +1,7 @@
 export type AppPolicyConfig = {
+  access?: {
+    mode?: AccessMode;
+  };
   apps?: {
     allowed?: string[];
     denied?: string[];
@@ -6,15 +9,18 @@ export type AppPolicyConfig = {
   };
 };
 
+export type AccessMode = "manual" | "confirm_on_retry" | "full_access";
+
 export type PolicyDecision =
   | { decision: "allowed"; reason?: undefined }
   | { decision: "denied"; reason: string }
   | { decision: "prompt_required"; reason: string }
-  | { decision: "approval_required"; reason: string };
+  | { decision: "approval_required"; reason: string; confirmation_token?: string };
 
 export type ActionPolicyInput = {
   tool: string;
   text?: string;
+  sensitive?: boolean;
   target?: string;
   selector?: {
     role?: string;
@@ -23,6 +29,7 @@ export type ActionPolicyInput = {
   };
   key?: string;
   modifiers?: string[];
+  confirmation_token?: string;
 };
 
 export type AppPolicyTarget =
@@ -33,17 +40,23 @@ export type AppPolicyTarget =
     };
 
 export class PolicyEngine {
+  private readonly mode: AccessMode;
   private readonly allowed: Set<string>;
   private readonly denied: Set<string>;
   private readonly prompt: Set<string>;
 
   constructor(config: AppPolicyConfig = {}) {
+    this.mode = config.access?.mode ?? "manual";
     this.allowed = new Set(config.apps?.allowed ?? []);
     this.denied = new Set(config.apps?.denied ?? []);
     this.prompt = new Set(config.apps?.prompt ?? []);
   }
 
   evaluateApp(app: AppPolicyTarget): PolicyDecision {
+    if (this.mode === "confirm_on_retry" || this.mode === "full_access") {
+      return { decision: "allowed" };
+    }
+
     const candidates = appPolicyCandidates(app);
     if (candidates.some((candidate) => this.denied.has(candidate))) {
       return { decision: "denied", reason: "app_denied" };
@@ -61,29 +74,58 @@ export class PolicyEngine {
   }
 
   evaluateAction(input: ActionPolicyInput): PolicyDecision {
-    if (input.text && looksSensitive(input.text)) {
-      return { decision: "approval_required", reason: "sensitive_text" };
+    if (this.mode === "full_access") {
+      return { decision: "allowed" };
+    }
+
+    if (input.sensitive || (input.text && looksSensitive(input.text))) {
+      return approvalDecision("sensitive_text", input, this.mode);
     }
 
     if (input.tool === "click") {
       const targetText = [input.target, input.selector?.label, input.selector?.value].filter(isNonEmptyString).join(" ");
       if (!targetText) {
-        return { decision: "approval_required", reason: "coordinate_click" };
+        return approvalDecision("coordinate_click", input, this.mode);
       }
       if (looksDestructive(targetText)) {
-        return { decision: "approval_required", reason: "destructive_action" };
+        return approvalDecision("destructive_action", input, this.mode);
       }
       if (looksExternalOrFinancial(targetText)) {
-        return { decision: "approval_required", reason: "external_action" };
+        return approvalDecision("external_action", input, this.mode);
       }
     }
 
     if (input.tool === "press_key" && isDestructiveShortcut(input.key, input.modifiers)) {
-      return { decision: "approval_required", reason: "destructive_action" };
+      return approvalDecision("destructive_action", input, this.mode);
     }
 
     return { decision: "allowed" };
   }
+
+  confirmationToken(reason: string): string {
+    return confirmationTokenForReason(reason);
+  }
+
+  accessMode(): AccessMode {
+    return this.mode;
+  }
+}
+
+function approvalDecision(reason: string, input: ActionPolicyInput, mode: AccessMode): PolicyDecision {
+  const confirmationToken = confirmationTokenForReason(reason);
+  if (mode === "confirm_on_retry" && input.confirmation_token === confirmationToken) {
+    return { decision: "allowed" };
+  }
+
+  const decision: PolicyDecision = {
+    decision: "approval_required",
+    reason,
+  };
+  return mode === "confirm_on_retry" ? { ...decision, confirmation_token: confirmationToken } : decision;
+}
+
+function confirmationTokenForReason(reason: string): string {
+  return `confirm_${reason}`;
 }
 
 function appPolicyCandidates(target: AppPolicyTarget): string[] {

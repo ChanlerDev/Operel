@@ -79,6 +79,11 @@ describe("Computer Use MCP server", () => {
         warnings: expect.any(Array),
         next_steps: expect.any(Array),
       });
+      expect(result.structuredContent).toMatchObject({
+        policy: {
+          access_mode: "manual",
+        },
+      });
     } finally {
       await server.close();
     }
@@ -256,6 +261,43 @@ describe("Computer Use MCP server", () => {
           reason: "destructive_action",
           message: "Action requires approval before continuing: destructive_action.",
           recoverable: true,
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("allows confirmed retry for risky actions in confirm-on-retry mode", async () => {
+    const policy = new PolicyEngine({
+      access: { mode: "confirm_on_retry" },
+      apps: {
+        allowed: [],
+        denied: [],
+        prompt: [],
+      },
+    });
+    const { client, server } = await connectTestClient(new SessionStore(), undefined, policy);
+
+    try {
+      const first = await client.callTool({
+        name: "act",
+        arguments: {
+          action: {
+            type: "click",
+            target: { label: "Delete account" },
+          },
+        },
+      });
+
+      expect(first.structuredContent).toEqual({
+        trace_id: expect.stringMatching(/^trace_/),
+        error: {
+          code: "approval_required",
+          reason: "destructive_action",
+          message: "Action requires approval before continuing: destructive_action.",
+          recoverable: true,
+          confirmation_token: "confirm_destructive_action",
         },
       });
     } finally {
